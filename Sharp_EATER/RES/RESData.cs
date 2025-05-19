@@ -112,6 +112,8 @@ namespace RESExtractor
                 if (fileset.RawOffset == 0 && fileset.Size == 0 && fileset.OffsetName == 0 && fileset.ChunkName == 0)
                 {
                     Console.WriteLine($"Fileset {i + 1}: [Dummy] - Skipped extraction.");
+                    fileset.Compressed = null;
+                    fileset.Filename = null;
                     continue;
                 }
 
@@ -123,6 +125,8 @@ namespace RESExtractor
                         if (!_PackageRDP)
                         {
                             Console.WriteLine($"Fileset {i + 1}: [Package] - Missing package.rdp, skipped.");
+                            fileset.Compressed = null;
+                            fileset.Filename = null;
                             continue;
                         }
                         sourceFile = "package.rdp";
@@ -131,6 +135,8 @@ namespace RESExtractor
                         if (!_DataRDP)
                         {
                             Console.WriteLine($"Fileset {i + 1}: [Data] - Missing data.rdp, skipped.");
+                            fileset.Compressed = null;
+                            fileset.Filename = null;
                             continue;
                         }
                         sourceFile = "data.rdp";
@@ -139,6 +145,8 @@ namespace RESExtractor
                         if (!_PatchRDP)
                         {
                             Console.WriteLine($"Fileset {i + 1}: [Patch] - Missing patch.rdp, skipped.");
+                            fileset.Compressed = null;
+                            fileset.Filename = null;
                             continue;
                         }
                         sourceFile = "patch.rdp";
@@ -153,6 +161,8 @@ namespace RESExtractor
                         break;
                     default:
                         Console.WriteLine($"Fileset {i + 1}: [Invalid Address Mode] - Skipped extraction.");
+                        fileset.Compressed = null;
+                        fileset.Filename = null;
                         continue;
                 }
 
@@ -161,6 +171,8 @@ namespace RESExtractor
                 if (string.IsNullOrEmpty(outputPath))
                 {
                     Console.WriteLine($"Fileset {i + 1}: [Invalid Names] - Skipped extraction.");
+                    fileset.Compressed = null;
+                    fileset.Filename = null;
                     continue;
                 }
 
@@ -177,6 +189,8 @@ namespace RESExtractor
                         // Create empty file
                         File.WriteAllBytes(outputPath, Array.Empty<byte>());
                         Console.WriteLine($"Fileset {i + 1}: Created empty file at {outputPath}");
+                        fileset.Compressed = false;
+                        fileset.Filename = outputPath;
                     }
                     else
                     {
@@ -194,6 +208,10 @@ namespace RESExtractor
                         // Write output data
                         File.WriteAllBytes(outputPath, outputData);
 
+                        // Set fileset properties
+                        fileset.Compressed = isCompressed;
+                        fileset.Filename = outputPath;
+
                         // Log extraction
                         if (isCompressed)
                             Console.WriteLine($"Fileset {i + 1}: Decompressed {chunk.Length} bytes to {outputData.Length} bytes at {outputPath}");
@@ -207,6 +225,8 @@ namespace RESExtractor
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Fileset {i + 1}: Failed to extract to {outputPath}. Error: {ex.Message}");
+                    fileset.Compressed = null;
+                    fileset.Filename = null;
                 }
             }
             Console.WriteLine("=== Extraction Complete ===");

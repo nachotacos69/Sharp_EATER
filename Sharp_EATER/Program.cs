@@ -25,13 +25,17 @@ namespace RESExtractor
                 // Read and parse the .res file
                 using (BinaryReader reader = new BinaryReader(File.Open(inputFile, FileMode.Open)))
                 {
-                    
                     resFile = new RES_PSP(reader);
                 } // Reader is closed here, freeing the .res file
 
-                
                 RESData printer = new RESData(resFile, PackageRDP, DataRDP, PatchRDP, inputFile);
                 printer.PrintInformation();
+
+                // Serialize to JSON
+                string jsonOutput = resFile.Serialize();
+                string outputJsonFile = Path.ChangeExtension(inputFile, ".json");
+                File.WriteAllText(outputJsonFile, jsonOutput);
+                Console.WriteLine($"Serialization complete. Output saved to {outputJsonFile}");
             }
             catch (Exception ex)
             {

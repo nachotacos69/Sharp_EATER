@@ -83,7 +83,6 @@
     <Compile Include="RES\RESData.cs" />
     <Compile Include="RES\RES_PSP.cs" />
     <Compile Include="Utils\Deflate.cs" />
-    <Compile Include="Utils\Serial.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

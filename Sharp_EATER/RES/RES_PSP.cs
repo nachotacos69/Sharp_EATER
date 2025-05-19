@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Text.Json;
+using System.Linq;
 
 namespace RESExtractor
 {
@@ -37,6 +39,22 @@ namespace RESExtractor
             public string[] Names { get; set; } // Parsed names (name, type, directories)
             public uint RealOffset { get; set; } // Processed offset after masking
             public string AddressMode { get; set; } // Type of offset (e.g., Current, RDP)
+            public uint[] NamesPointer { get; set; } // Pointers to name data
+            public bool? Compressed { get; set; } // True if decompressed, false if raw, null if not extracted
+            public string Filename { get; set; } // Path to extracted file
+
+            // Returns an array indicating presence (true) or absence (false) of fields
+            public bool[] GetFilesetPointers()
+            {
+                return new[]
+                {
+                    RawOffset != 0,
+                    Size != 0,
+                    OffsetName != 0,
+                    ChunkName != 0,
+                    UnpackSize != 0
+                };
+            }
         }
         public List<Fileset> Filesets { get; private set; }
 
@@ -90,9 +108,13 @@ namespace RESExtractor
                 fileset.AddressMode = GetAddressMode(fileset.RawOffset);
                 fileset.RealOffset = ProcessOffset(fileset.RawOffset, fileset.AddressMode);
 
-                // Read names if OffsetName is valid
+                // Read names and pointers if OffsetName is valid
                 if (fileset.OffsetName != 0)
-                    fileset.Names = ReadNames(reader, fileset.OffsetName, fileset.ChunkName);
+                {
+                    (string[] names, uint[] pointers) = ReadNames(reader, fileset.OffsetName, fileset.ChunkName);
+                    fileset.Names = names;
+                    fileset.NamesPointer = pointers;
+                }
 
                 Filesets.Add(fileset);
             }
@@ -122,7 +144,7 @@ namespace RESExtractor
             return offset;
         }
 
-        private string[] ReadNames(BinaryReader reader, uint offsetName, uint chunkName)
+        private (string[], uint[]) ReadNames(BinaryReader reader, uint offsetName, uint chunkName)
         {
             long originalPosition = reader.BaseStream.Position;
             reader.BaseStream.Seek(offsetName, SeekOrigin.Begin);
@@ -140,12 +162,52 @@ namespace RESExtractor
                 char c;
                 while ((c = reader.ReadChar()) != '\0')
                     sb.Append(c);
-                if (sb.Length > 0)
-                    names.Add(sb.ToString());
+                // Always add the string, even if empty
+                names.Add(sb.ToString());
             }
 
             reader.BaseStream.Seek(originalPosition, SeekOrigin.Begin);
-            return names.ToArray();
+            return (names.ToArray(), pointers);
+        }
+
+        public string Serialize()
+        {
+            var options = new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            };
+
+            var serializedData = new
+            {
+                MagicHeader,
+                GroupOffset,
+                GroupCount,
+                UNK1,
+                Configs,
+                DataSets = DataSets.Select(ds => new
+                {
+                    ds.Offset,
+                    ds.Count
+                }).ToList(),
+                Filesets = Filesets.Select(fs => new
+                {
+                    FilesetPointers = fs.GetFilesetPointers(),
+                    fs.RawOffset,
+                    fs.RealOffset,
+                    fs.AddressMode,
+                    fs.Size,
+                    fs.OffsetName,
+                    fs.ChunkName,
+                    fs.UnpackSize,
+                    NamesPointer = fs.NamesPointer?.Select(p => (uint?)p).ToArray(),
+                    fs.Names,
+                    fs.Compressed,
+                    fs.Filename
+                }).ToList()
+            };
+
+            return JsonSerializer.Serialize(serializedData, options);
         }
     }
 }
