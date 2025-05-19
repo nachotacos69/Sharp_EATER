@@ -21,16 +21,17 @@ namespace RESExtractor
 
             try
             {
-                // Read the .res file
+                RES_PSP resFile;
+                // Read and parse the .res file
                 using (BinaryReader reader = new BinaryReader(File.Open(inputFile, FileMode.Open)))
                 {
-                    // Parse the .res file structure
-                    RES_PSP resFile = new RES_PSP(reader);
+                    
+                    resFile = new RES_PSP(reader);
+                } // Reader is closed here, freeing the .res file
 
-                    // Print the extracted information
-                    RESData printer = new RESData(resFile, PackageRDP, DataRDP, PatchRDP);
-                    printer.PrintInformation();
-                }
+                
+                RESData printer = new RESData(resFile, PackageRDP, DataRDP, PatchRDP, inputFile);
+                printer.PrintInformation();
             }
             catch (Exception ex)
             {
