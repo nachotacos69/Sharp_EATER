@@ -14,7 +14,6 @@ namespace RESExtractor
         private readonly string _inputResFile;
         private readonly string _outputFolder;
 
-        
         public RESData(RES_PSP resFile, bool PackageRDP, bool DataRDP, bool PatchRDP, string inputResFile)
         {
             _resFile = resFile;
@@ -22,7 +21,6 @@ namespace RESExtractor
             _DataRDP = DataRDP;
             _PatchRDP = PatchRDP;
             _inputResFile = inputResFile;
-            
             _outputFolder = Path.GetFileNameWithoutExtension(inputResFile);
         }
 
@@ -58,7 +56,6 @@ namespace RESExtractor
                     continue;
                 }
                 // Print Reserve/Empty filesets
-                
                 else if (fileset.RawOffset == 0 && fileset.Size == 0 && fileset.OffsetName != 0 && fileset.ChunkName != 0 && fileset.UnpackSize == 0)
                 {
                     Console.WriteLine($"Fileset {i + 1}: [Reserve/Empty]");
@@ -159,7 +156,7 @@ namespace RESExtractor
                         continue;
                 }
 
-                // Construct output
+                // Construct output path
                 string outputPath = ConstructOutputPath(fileset, existingFiles, i + 1);
                 if (string.IsNullOrEmpty(outputPath))
                 {
@@ -183,13 +180,25 @@ namespace RESExtractor
                     }
                     else
                     {
+                        byte[] chunk;
                         using (BinaryReader reader = new BinaryReader(File.Open(sourceFile, FileMode.Open)))
                         {
                             reader.BaseStream.Seek(fileset.RealOffset, SeekOrigin.Begin);
-                            byte[] chunk = reader.ReadBytes((int)fileset.Size);
-                            File.WriteAllBytes(outputPath, chunk);
-                            Console.WriteLine($"Fileset {i + 1}: Extracted {fileset.Size} bytes to {outputPath}");
+                            chunk = reader.ReadBytes((int)fileset.Size);
                         }
+
+                        // Decompress chunk
+                        bool isCompressed;
+                        byte[] outputData = Deflate.DecompressChunk(chunk, out isCompressed);
+
+                        // Write output data
+                        File.WriteAllBytes(outputPath, outputData);
+
+                        // Log extraction
+                        if (isCompressed)
+                            Console.WriteLine($"Fileset {i + 1}: Decompressed {chunk.Length} bytes to {outputData.Length} bytes at {outputPath}");
+                        else
+                            Console.WriteLine($"Fileset {i + 1}: Extracted {chunk.Length} bytes (raw) to {outputPath}");
                     }
 
                     // Mark file as created
@@ -227,7 +236,7 @@ namespace RESExtractor
 
             // Handle duplicates
             string finalPath = outputPath;
-            int counter = 0;
+            int counter = 1;
             while (existingFiles.Contains(finalPath) || File.Exists(finalPath))
             {
                 string prefix = $"_{counter:D4}";
