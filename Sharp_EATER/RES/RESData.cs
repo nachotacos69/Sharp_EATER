@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 
 namespace RESExtractor
 {
@@ -94,7 +95,7 @@ namespace RESExtractor
                 Console.WriteLine();
             }
 
-            // Perform extraction after printing
+            // Perform extraction and dictionary generation
             ExtractFiles();
         }
 
@@ -103,6 +104,10 @@ namespace RESExtractor
             Console.WriteLine("=== Extracting Files ===");
             // Track existing files to handle duplicates
             HashSet<string> existingFiles = new HashSet<string>();
+            // Dictionaries to track files by realOffset for each RDP file
+            var packageDict = new Dictionary<uint, List<string>>();
+            var dataDict = new Dictionary<uint, List<string>>();
+            var patchDict = new Dictionary<uint, List<string>>();
 
             for (int i = 0; i < _resFile.Filesets.Count; i++)
             {
@@ -119,6 +124,7 @@ namespace RESExtractor
 
                 // Determine the source file based on address mode
                 string sourceFile = null;
+                Dictionary<uint, List<string>> targetDict = null;
                 switch (fileset.AddressMode)
                 {
                     case "Package":
@@ -130,6 +136,7 @@ namespace RESExtractor
                             continue;
                         }
                         sourceFile = "package.rdp";
+                        targetDict = packageDict;
                         break;
                     case "Data":
                         if (!_DataRDP)
@@ -140,6 +147,7 @@ namespace RESExtractor
                             continue;
                         }
                         sourceFile = "data.rdp";
+                        targetDict = dataDict;
                         break;
                     case "Patch":
                         if (!_PatchRDP)
@@ -150,6 +158,7 @@ namespace RESExtractor
                             continue;
                         }
                         sourceFile = "patch.rdp";
+                        targetDict = patchDict;
                         break;
                     case "SET_C":
                     case "SET_D":
@@ -212,6 +221,14 @@ namespace RESExtractor
                         fileset.Compressed = isCompressed;
                         fileset.Filename = outputPath;
 
+                        // Add to RDP dictionary if applicable
+                        if (targetDict != null)
+                        {
+                            if (!targetDict.ContainsKey(fileset.RealOffset))
+                                targetDict[fileset.RealOffset] = new List<string>();
+                            targetDict[fileset.RealOffset].Add(outputPath);
+                        }
+
                         // Log extraction
                         if (isCompressed)
                             Console.WriteLine($"Fileset {i + 1}: Decompressed {chunk.Length} bytes to {outputData.Length} bytes at {outputPath}");
@@ -229,7 +246,36 @@ namespace RESExtractor
                     fileset.Filename = null;
                 }
             }
+
+            // Serialize dictionaries
+            SerializeRDPDictionaries(packageDict, "packageDict.json");
+            SerializeRDPDictionaries(dataDict, "dataDict.json");
+            SerializeRDPDictionaries(patchDict, "patchDict.json");
+
             Console.WriteLine("=== Extraction Complete ===");
+        }
+
+        private void SerializeRDPDictionaries(Dictionary<uint, List<string>> dict, string outputFileName)
+        {
+            var outputDir = Path.GetDirectoryName(_inputResFile);
+            var outputPath = string.IsNullOrEmpty(outputDir) ? outputFileName : Path.Combine(outputDir, outputFileName);
+
+            var serializedData = dict.Select((kvp, index) => new
+            {
+                Index = index + 1,
+                Files = kvp.Value,
+                RealOffset = kvp.Key
+            }).ToList();
+
+            var options = new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            };
+
+            string jsonOutput = JsonSerializer.Serialize(serializedData, options);
+            File.WriteAllText(outputPath, jsonOutput);
+            Console.WriteLine($"RDP dictionary saved to {outputPath}");
         }
 
         private string ConstructOutputPath(RES_PSP.Fileset fileset, HashSet<string> existingFiles, int filesetIndex)
