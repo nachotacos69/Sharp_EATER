@@ -60,32 +60,33 @@ namespace RESExtractor
         {
             try
             {
-                // Step 1: Load and validate input files
+                // Load and validate input files
                 Load();
 
-                // Step 2: Repack the data
-                string outputResFile = Path.ChangeExtension(_inputResFile, "_repacked.res");
-                using (MemoryStream outputStream = new MemoryStream())
+                // Copy original .res file into memory
+                byte[] originalResData = File.ReadAllBytes(_inputResFile);
+                using (MemoryStream outputStream = new MemoryStream(originalResData))
                 using (BinaryWriter writer = new BinaryWriter(outputStream))
                 {
-                    // Write header (32 bytes)
-                    writer.Write(_resFile.MagicHeader); // 4 bytes
-                    writer.Write(_resFile.GroupOffset); // 4 bytes
-                    writer.Write(_resFile.GroupCount); // 1 byte
-                    writer.Write(_resFile.UNK1); // 4 bytes
+                    // Write and Update header (32 bytes) at the beginning of the file
+                    outputStream.Seek(0, SeekOrigin.Begin);
+                    writer.Write(_jsonData.MagicHeader); // 4 bytes
+                    writer.Write(_jsonData.GroupOffset); // 4 bytes
+                    writer.Write(_jsonData.GroupCount); // 1 byte
+                    writer.Write(_jsonData.UNK1); // 4 bytes
                     writer.Write(new byte[3]); // 3 bytes padding
-                    writer.Write(_resFile.Configs); // 4 bytes
+                    writer.Write(_jsonData.Configs); // 4 bytes
                     writer.Write(new byte[12]); // 12 bytes padding
 
-                    // Write DataSets at GroupOffset (8 bytes each, 8 groups)
-                    outputStream.Seek(_resFile.GroupOffset, SeekOrigin.Begin);
-                    foreach (var dataSet in _resFile.DataSets)
+                    // Update DataSets at GroupOffset (8 bytes each, 8 groups)
+                    outputStream.Seek(_jsonData.GroupOffset, SeekOrigin.Begin);
+                    foreach (var jsonDataSet in _jsonData.DataSets)
                     {
-                        writer.Write(dataSet.Offset); // 4 bytes
-                        writer.Write(dataSet.Count); // 4 bytes
+                        writer.Write(jsonDataSet.Offset); // 4 bytes
+                        writer.Write(jsonDataSet.Count); // 4 bytes
                     }
 
-                    // Write Filesets starting at 0x60
+                    // Update Filesets starting at 0x60
                     outputStream.Seek(0x60, SeekOrigin.Begin);
                     for (int i = 0; i < _resFile.Filesets.Count; i++)
                     {
@@ -98,40 +99,8 @@ namespace RESExtractor
                         writer.Write(fileset.UnpackSize); // 4 bytes
                     }
 
-                    // Copy name data verbatim from original file
-                    Dictionary<uint, byte[]> nameDataBlocks = new Dictionary<uint, byte[]>();
-                    using (BinaryReader reader = new BinaryReader(File.Open(_inputResFile, FileMode.Open)))
-                    {
-                        foreach (var fileset in _resFile.Filesets)
-                        {
-                            if (fileset.OffsetName != 0 && !nameDataBlocks.ContainsKey(fileset.OffsetName))
-                            {
-                                reader.BaseStream.Seek(fileset.OffsetName, SeekOrigin.Begin);
-                                uint[] pointers = new uint[fileset.ChunkName];
-                                for (int i = 0; i < fileset.ChunkName; i++)
-                                    pointers[i] = reader.ReadUInt32();
-
-                                uint maxPointer = pointers.Length > 0 ? pointers.Max() : fileset.OffsetName;
-                                reader.BaseStream.Seek(maxPointer, SeekOrigin.Begin);
-                                StringBuilder sb = new StringBuilder();
-                                while (reader.BaseStream.Position < reader.BaseStream.Length && reader.ReadByte() != 0)
-                                    sb.Append((char)reader.ReadByte());
-                                int nameBlockSize = (int)(reader.BaseStream.Position - fileset.OffsetName);
-                                reader.BaseStream.Seek(fileset.OffsetName, SeekOrigin.Begin);
-                                nameDataBlocks[fileset.OffsetName] = reader.ReadBytes(nameBlockSize);
-                            }
-                        }
-                    }
-
-                    // Write name data at original offsets
-                    foreach (var kvp in nameDataBlocks)
-                    {
-                        outputStream.Seek(kvp.Key, SeekOrigin.Begin);
-                        writer.Write(kvp.Value);
-                    }
-
                     // Replace chunks for SET_C and SET_D Filesets
-                    uint currentOffset = _resFile.Configs; // Start at Configs offset
+                    uint currentOffset = _jsonData.Configs; // Start at Configs offset
                     for (int i = 0; i < _resFile.Filesets.Count; i++)
                     {
                         var fileset = _resFile.Filesets[i];
@@ -218,7 +187,8 @@ namespace RESExtractor
                         }
                     }
 
-                    // Write output file
+                    // Writing the output file
+                    string outputResFile = Path.ChangeExtension(_inputResFile, "_repacked.res");
                     File.WriteAllBytes(outputResFile, outputStream.ToArray());
                     Console.WriteLine($"Repacking complete. Output saved to {outputResFile}");
                 }
@@ -271,6 +241,7 @@ namespace RESExtractor
             if (_resFile.Configs != _jsonData.Configs)
                 throw new InvalidDataException($"Configs mismatch: RES=0x{_resFile.Configs:X8}, JSON=0x{_jsonData.Configs:X8}");
 
+           /* DEBUG
             Console.WriteLine("Header validated successfully:");
             Console.WriteLine($"  MagicHeader: 0x{_resFile.MagicHeader:X8}");
             Console.WriteLine($"  GroupOffset: 0x{_resFile.GroupOffset:X8}");
@@ -278,6 +249,7 @@ namespace RESExtractor
             Console.WriteLine($"  UNK1: 0x{_resFile.UNK1:X8}");
             Console.WriteLine($"  Configs: 0x{_resFile.Configs:X8}");
             Console.WriteLine();
+           */
 
             // Validate DataSets
             if (_resFile.DataSets.Count != _jsonData.DataSets.Count || _resFile.DataSets.Count != 8)
@@ -290,7 +262,7 @@ namespace RESExtractor
                 if (resDataSet.Offset != jsonDataSet.Offset || resDataSet.Count != jsonDataSet.Count)
                     throw new InvalidDataException($"DataSet {i + 1} mismatch: RES Offset=0x{resDataSet.Offset:X8}, Count={resDataSet.Count}; JSON Offset=0x{jsonDataSet.Offset:X8}, Count={jsonDataSet.Count}");
 
-                Console.WriteLine($"DataSet {i + 1}: Offset=0x{resDataSet.Offset:X8}, Count={resDataSet.Count}");
+             // DBG   Console.WriteLine($"DataSet {i + 1}: Offset=0x{resDataSet.Offset:X8}, Count={resDataSet.Count}");
             }
             Console.WriteLine();
 
@@ -345,6 +317,7 @@ namespace RESExtractor
                 }
 
                 // Log Fileset details
+                /* DEBUG PRINTS
                 Console.WriteLine($"Fileset {i + 1}:");
                 Console.WriteLine($"  RawOffset: 0x{resFileset.RawOffset:X8}");
                 Console.WriteLine($"  AddressMode: {resFileset.AddressMode}");
@@ -352,17 +325,18 @@ namespace RESExtractor
                 Console.WriteLine($"  OffsetName: 0x{resFileset.OffsetName:X8}");
                 Console.WriteLine($"  ChunkName: {resFileset.ChunkName}");
                 Console.WriteLine($"  UnpackSize: {resFileset.UnpackSize} bytes");
+                */
                 if (resFileset.Names != null && resFileset.Names.Length > 0)
                 {
-                    Console.WriteLine("  Names:");
-                    for (int j = 0; j < resFileset.Names.Length; j++)
-                        Console.WriteLine($"    [{j}]: {resFileset.Names[j]}");
+                    // DBG   Console.WriteLine("  Names:");
+                    for (int j = 0; j < resFileset.Names.Length; j++) ;
+                     // DBG   Console.WriteLine($"    [{j}]: {resFileset.Names[j]}");
                 }
                 if (resFileset.NamesPointer != null && resFileset.NamesPointer.Length > 0)
                 {
-                    Console.WriteLine("  NamesPointer:");
-                    for (int j = 0; j < resFileset.NamesPointer.Length; j++)
-                        Console.WriteLine($"    [{j}]: 0x{resFileset.NamesPointer[j]:X8}");
+                    // DBG Console.WriteLine("  NamesPointer:");
+                    for (int j = 0; j < resFileset.NamesPointer.Length; j++) ;
+                     // DBG   Console.WriteLine($"    [{j}]: 0x{resFileset.NamesPointer[j]:X8}");
                 }
             }
 
