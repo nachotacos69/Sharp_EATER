@@ -1,101 +1,120 @@
-﻿using System;
-using System.Collections.Generic;
+﻿/* Lmao this took me a day to properly implement something like this
+ * to make GOD EATER 2 (PSP) literally accept this compression
+ * i was looking for other compression methods. And i almost gave up
+ */
+
+
+/* Order after compression: 
+            * Header  
+            * Last full chunk 
+            * Tail chunk  
+            * Full chunks
+            */
+
+using System;
 using System.IO;
-using System.IO.Compression;
+using System.Collections.Generic;
+using ICSharpCode.SharpZipLib.Zip.Compression; // use this :D
 
-namespace RESExtractor
+public static class Compression
 {
-    public static class Deflate
+    private static readonly byte[] Header = new byte[] { 0x62, 0x6C, 0x7A, 0x32 }; // "blz2 in ASCII,"
+    private const int MaxBlockSize = 0xFFFF; // 64KB max per block
+
+    public static byte[] LeCompression(byte[] inputData)
     {
-        private const uint BLZ2_HEADER = 0x327A6C62; // 'blz2' in little-endian
+        Console.WriteLine($"[Debug] Original File Size: {inputData.Length} bytes (0x{inputData.Length:X4})");
 
-        /// <summary>
-        /// Decompresses a chunk that may contain single or multiple compressed C_BLOCKs.
-        /// For multiple blocks, the first block is moved to the end after decompression.
-        /// Returns raw data if no 'blz2' header is present, without logging.
-        /// </summary>
-        /// <param name="chunk">The input chunk data.</param>
-        /// <param name="isCompressed">Output indicating if decompression was performed.</param>
-        /// <returns>The decompressed or raw chunk data.</returns>
-        public static byte[] DecompressChunk(byte[] chunk, out bool isCompressed)
+        int totalSize = inputData.Length;
+        int tailSize = totalSize % MaxBlockSize;
+        int fullBlocks = totalSize / MaxBlockSize;
+
+        Console.WriteLine($"[Debug] Tail Size: {tailSize} bytes");
+        Console.WriteLine($"[Debug] Full Blocks: {fullBlocks}");
+
+        List<byte[]> compressedBlocks = new List<byte[]>();
+
+        // 1. Compress the Tail (head chunk)
+        byte[] tailChunk = new byte[tailSize];
+        Array.Copy(inputData, 0, tailChunk, 0, tailSize);
+        byte[] compressedTail = DeflateCompress(tailChunk);
+        compressedBlocks.Add(compressedTail);
+
+        // 2. Compress Full 64KB Blocks (body)
+        for (int i = 0; i < fullBlocks - 1; i++)
         {
-            isCompressed = false;
-
-            // Minimum size for header (4) + BUFFSIZE (2)
-            if (chunk.Length < 6)
-                return chunk;
-
-            using (MemoryStream ms = new MemoryStream(chunk))
-            using (BinaryReader reader = new BinaryReader(ms))
-            {
-                // Check for 'blz2' header
-                uint header = reader.ReadUInt32();
-                if (header != BLZ2_HEADER)
-                    return chunk; // No header, return raw data
-
-                isCompressed = true;
-                List<byte[]> decompressedBlocks = new List<byte[]>();
-
-                // Read all blocks
-                while (reader.BaseStream.Position < reader.BaseStream.Length)
-                {
-                    // Read BUFFSIZE (uint16)
-                    if (reader.BaseStream.Length - reader.BaseStream.Position < 2)
-                        throw new InvalidDataException("Incomplete BUFFSIZE data in compressed chunk.");
-
-                    ushort buffSize = reader.ReadUInt16();
-
-                    // Validate C_BLOCK size
-                    if (reader.BaseStream.Position + buffSize > reader.BaseStream.Length)
-                        throw new InvalidDataException("C_BLOCK size exceeds chunk length.");
-
-                    // Read C_BLOCK
-                    byte[] cBlock = reader.ReadBytes(buffSize);
-
-                    // Decompress C_BLOCK
-                    byte[] decompressedBlock = DecompressCBlock(cBlock);
-                    decompressedBlocks.Add(decompressedBlock);
-                }
-
-                // Handle block count
-                if (decompressedBlocks.Count == 0)
-                    throw new InvalidDataException("No valid C_BLOCKs found in compressed chunk.");
-                else if (decompressedBlocks.Count == 1)
-                {
-                    // Single block, no rearrangement needed
-                    return decompressedBlocks[0];
-                }
-                else
-                {
-                    // Multiple blocks: move first block (tail) to the end
-                    List<byte> rearranged = new List<byte>();
-                    // Add blocks 1 to N-1 (head and body)
-                    for (int i = 1; i < decompressedBlocks.Count; i++)
-                        rearranged.AddRange(decompressedBlocks[i]);
-                    // Add first block (tail) at the end
-                    rearranged.AddRange(decompressedBlocks[0]);
-                    return rearranged.ToArray();
-                }
-            }
+            byte[] block = new byte[MaxBlockSize];
+            Array.Copy(inputData, tailSize + (i * MaxBlockSize), block, 0, MaxBlockSize);
+            compressedBlocks.Add(DeflateCompress(block));
         }
 
-        /// <summary>
-        /// Decompresses a single C_BLOCK using raw Deflate (-15 window bits, no ZLIB header).
-        /// </summary>
-        /// <param name="cBlock">The compressed C_BLOCK data.</param>
-        /// <returns>The decompressed data.</returns>
-        private static byte[] DecompressCBlock(byte[] cBlock)
+        // 3. Compress Last Full 64KB Block (tail)
+        if (fullBlocks > 0)
         {
-            using (MemoryStream input = new MemoryStream(cBlock))
-            using (MemoryStream output = new MemoryStream())
+            byte[] lastBlock = new byte[MaxBlockSize];
+            Array.Copy(inputData, tailSize + ((fullBlocks - 1) * MaxBlockSize), lastBlock, 0, MaxBlockSize);
+            byte[] compressedLastBlock = DeflateCompress(lastBlock);
+            compressedBlocks.Add(compressedLastBlock);
+        }
+
+        Console.WriteLine($"[Debug] Total Compressed Blocks: {compressedBlocks.Count}");
+
+        // 4: Rearrange Blocks. Like LEGO, you should "Rearrange your Blocks" after use.
+        using (var outputStream = new MemoryStream())
+        {
+            outputStream.Write(Header, 0, Header.Length);
+
+            // Order: Header → Last full chunk → Tail chunk → Full chunks
+            if (compressedBlocks.Count > 1)
+                outputStream.Write(compressedBlocks[compressedBlocks.Count - 1], 0, compressedBlocks[compressedBlocks.Count - 1].Length);
+
+            outputStream.Write(compressedBlocks[0], 0, compressedBlocks[0].Length);
+
+            for (int i = 1; i < compressedBlocks.Count - 1; i++)
             {
-                // Use DeflateStream with raw deflate settings
-                using (DeflateStream deflate = new DeflateStream(input, CompressionMode.Decompress))
-                {
-                    deflate.CopyTo(output);
-                }
-                return output.ToArray();
+                outputStream.Write(compressedBlocks[i], 0, compressedBlocks[i].Length);
             }
+
+            Console.WriteLine($"[Debug] Final Compressed File Size: {outputStream.Length} bytes (0x{outputStream.Length:X4})");
+            return outputStream.ToArray();
+        }
+    }
+
+    private static byte[] DeflateCompress(byte[] inputData)
+    {
+        using (var compressedStream = new MemoryStream())
+        {
+            var deflater = new Deflater(Deflater.BEST_COMPRESSION, true); // No Zlib Header
+            deflater.SetInput(inputData);
+            deflater.Finish();
+
+            byte[] buffer = new byte[1024];
+            while (!deflater.IsFinished)
+            {
+                int count = deflater.Deflate(buffer);
+                compressedStream.Write(buffer, 0, count);
+            }
+
+            // Get compressed data
+            byte[] compressedData = compressedStream.ToArray();
+
+
+            // I had to revamp this area multiple times, just to make it more compatible to the game
+            // Converted length to signed 16-bit (short) and store in Little Endian
+            // Ensures Little Endian format on this one.
+
+            short signedLength = (short)compressedData.Length; // Convert to signed short
+            byte[] sizeBytes = BitConverter.GetBytes(signedLength);
+
+            if (!BitConverter.IsLittleEndian)
+                Array.Reverse(sizeBytes);
+
+            // Creating the final block with signed size prefix
+            byte[] finalBlock = new byte[compressedData.Length + 2];
+            Array.Copy(sizeBytes, 0, finalBlock, 0, 2);
+            Array.Copy(compressedData, 0, finalBlock, 2, compressedData.Length);
+
+            return finalBlock;
         }
     }
 }

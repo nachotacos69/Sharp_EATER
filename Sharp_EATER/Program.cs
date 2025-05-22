@@ -8,38 +8,68 @@ namespace RESExtractor
         static void Main(string[] args)
         {
             // Validate command-line arguments
-            if (args.Length < 2 || args[0] != "-x" || !File.Exists(args[1]))
+            if (args.Length < 2)
             {
-                Console.WriteLine("Usage: RESExtractor.exe -x [input.res]");
+                Console.WriteLine("Usage: RESExtractor.exe [-x|-r] [input.res] [input.json for -r]");
                 return;
             }
 
-            string inputFile = args[1];
-            bool PackageRDP = File.Exists("package.rdp");
-            bool DataRDP = File.Exists("data.rdp");
-            bool PatchRDP = File.Exists("patch.rdp");
+            string mode = args[0];
+            string inputResFile = args[1];
 
             try
             {
-                RES_PSP resFile;
-                // Read and parse the .res file
-                using (BinaryReader reader = new BinaryReader(File.Open(inputFile, FileMode.Open)))
+                if (mode == "-x")
                 {
-                    resFile = new RES_PSP(reader);
-                } // Reader is closed here, freeing the .res file
+                    // Extraction mode
+                    if (!File.Exists(inputResFile))
+                    {
+                        Console.WriteLine($"Error: Input .res file not found: {inputResFile}");
+                        return;
+                    }
 
-                RESData printer = new RESData(resFile, PackageRDP, DataRDP, PatchRDP, inputFile);
-                printer.PrintInformation();
+                    bool PackageRDP = File.Exists("package.rdp");
+                    bool DataRDP = File.Exists("data.rdp");
+                    bool PatchRDP = File.Exists("patch.rdp");
 
-                // Serialize to JSON
-                string jsonOutput = resFile.Serialize();
-                string outputJsonFile = Path.ChangeExtension(inputFile, ".json");
-                File.WriteAllText(outputJsonFile, jsonOutput);
-                Console.WriteLine($"Serialization complete. Output saved to {outputJsonFile}");
+                    // Read and parse the .res file
+                    RES_PSP resFile;
+                    using (BinaryReader reader = new BinaryReader(File.Open(inputResFile, FileMode.Open)))
+                    {
+                        resFile = new RES_PSP(reader);
+                    }
+
+                    RESData printer = new RESData(resFile, PackageRDP, DataRDP, PatchRDP, inputResFile);
+                    printer.PrintInformation();
+
+                    // Serialize to JSON
+                    string jsonOutput = resFile.Serialize();
+                    string outputJsonFile = Path.ChangeExtension(inputResFile, ".json");
+                    File.WriteAllText(outputJsonFile, jsonOutput);
+                    Console.WriteLine($"Serialization complete. Output saved to {outputJsonFile}");
+                }
+                else if (mode == "-r")
+                {
+                    // Repack mode
+                    if (args.Length < 3)
+                    {
+                        Console.WriteLine("Error: -r mode requires both .res and .json files.");
+                        Console.WriteLine("Usage: RESExtractor.exe -r [input.res] [input.json]");
+                        return;
+                    }
+
+                    string inputJsonFile = args[2];
+                    PackRES packer = new PackRES(inputResFile, inputJsonFile);
+                    packer.Repack();
+                }
+                else
+                {
+                    Console.WriteLine($"Error: Invalid mode '{mode}'. Use -x for extraction or -r for repack.");
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error processing file: {ex.Message}");
+                Console.WriteLine($"Error processing files: {ex.Message}");
             }
         }
     }
