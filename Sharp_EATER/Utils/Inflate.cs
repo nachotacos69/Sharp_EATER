@@ -9,14 +9,12 @@ namespace RESExtractor
     {
         private const uint BLZ2_HEADER = 0x327A6C62; // 'blz2' in little-endian
 
-        /// <summary>
-        /// Decompresses a chunk that may contain single or multiple compressed C_BLOCKs.
-        /// For multiple blocks, the first block is moved to the end after decompression.
-        /// Returns raw data if no 'blz2' header is present, without logging.
-        /// </summary>
-        /// <param name="chunk">The input chunk data.</param>
-        /// <param name="isCompressed">Output indicating if decompression was performed.</param>
-        /// <returns>The decompressed or raw chunk data.</returns>
+        
+        /* Decompresses a chunk that may contain single or multiple compressed C_BLOCKs.
+         For multiple blocks, the first block is moved to the end after decompression.
+         Returns raw data if no 'blz2' header is present without prints/logging.
+
+        /// */
         public static byte[] DecompressChunk(byte[] chunk, out bool isCompressed)
         {
             isCompressed = false;
@@ -79,11 +77,9 @@ namespace RESExtractor
             }
         }
 
-        /// <summary>
+
         /// Decompresses a single C_BLOCK using raw Deflate (-15 window bits, no ZLIB header).
-        /// </summary>
-        /// <param name="cBlock">The compressed C_BLOCK data.</param>
-        /// <returns>The decompressed data.</returns>
+        
         private static byte[] DecompressCBlock(byte[] cBlock)
         {
             using (MemoryStream input = new MemoryStream(cBlock))

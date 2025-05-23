@@ -50,6 +50,14 @@ namespace RESExtractor
             public string Filename { get; set; }
         }
 
+        // Structure for RDP dictionary entries
+        private class RDPDictionaryEntry
+        {
+            public int Index { get; set; }
+            public string[] Files { get; set; }
+            public uint RealOffset { get; set; }
+        }
+
         public PackRES(string inputResFile, string inputJsonFile)
         {
             _inputResFile = inputResFile ?? throw new ArgumentNullException(nameof(inputResFile));
@@ -62,6 +70,9 @@ namespace RESExtractor
             {
                 // Load and validate input files
                 Load();
+
+                // Load RDP dictionaries
+                var rdpDictionaries = LoadRDPDictionaries();
 
                 // Copy original .res file into memory
                 byte[] originalResData = File.ReadAllBytes(_inputResFile);
@@ -99,23 +110,81 @@ namespace RESExtractor
                         writer.Write(fileset.UnpackSize); // 4 bytes
                     }
 
-                    // Replace chunks for SET_C and SET_D Filesets
-                    uint currentOffset = _jsonData.Configs; // Start at Configs offset
+                    // Prepare RDP file streams
+                    // i meant to do a  memory load but i can't risk longer time and l
+                    Dictionary<string, (FileStream Stream, BinaryWriter Writer, string OutputPath)> rdpStreams = PrepareRDPStreams();
+
+                    // Track Filesets that share realOffset for RDP files
+                    Dictionary<string, Dictionary<uint, (uint Size, uint UnpackSize)>> rdpSharedOffsets = new Dictionary<string, Dictionary<uint, (uint, uint)>>();
+                    foreach (var rdp in rdpStreams.Keys)
+                        rdpSharedOffsets[rdp] = new Dictionary<uint, (uint, uint)>();
+
+                    // Replace chunks for SET_C, SET_D, Package, Data, and Patch Filesets
+                    uint currentResOffset = _jsonData.Configs; // Start at Configs offset for .res file
                     for (int i = 0; i < _resFile.Filesets.Count; i++)
                     {
                         var fileset = _resFile.Filesets[i];
                         var jsonFileset = _jsonData.Filesets[i];
 
-                        // Skip if not SET_C/SET_D or any FilesetPointers are false
-                        if (fileset.AddressMode != "SET_C" && fileset.AddressMode != "SET_D")
+                        // Skip if DataSet or any FilesetPointers are invalid/false
+                        if (fileset.AddressMode == "DataSet")
                         {
-                            Console.WriteLine($"Fileset {i + 1}: [AddressMode={fileset.AddressMode}] - Skipped.");
+                            Console.WriteLine($"Fileset {i + 1}: [AddressMode=DataSet] - Skipped.");
                             continue;
                         }
                         if (jsonFileset.FilesetPointers.Any(p => !p))
                         {
                             Console.WriteLine($"Fileset {i + 1}: [Invalid FilesetPointers] - Skipped.");
                             continue;
+                        }
+
+                        // RDP or .res file handling
+                        string rdpFile = null;
+                        BinaryWriter targetWriter = writer;
+                        uint currentOffset = currentResOffset;
+                        bool isRDP = false;
+                        switch (fileset.AddressMode)
+                        {
+                            case "SET_C":
+                            case "SET_D":
+                                // Handled in .res file
+                                break;
+                            case "Package":
+                                rdpFile = "package.rdp";
+                                if (!rdpStreams.ContainsKey(rdpFile))
+                                {
+                                    Console.WriteLine($"Fileset {i + 1}: [Package] - Missing package.rdp or dictionary, skipped.");
+                                    continue;
+                                }
+                                isRDP = true;
+                                targetWriter = rdpStreams[rdpFile].Writer;
+                                currentOffset = fileset.RealOffset;
+                                break;
+                            case "Data":
+                                rdpFile = "data.rdp";
+                                if (!rdpStreams.ContainsKey(rdpFile))
+                                {
+                                    Console.WriteLine($"Fileset {i + 1}: [Data] - Missing data.rdp or dictionary, skipped.");
+                                    continue;
+                                }
+                                isRDP = true;
+                                targetWriter = rdpStreams[rdpFile].Writer;
+                                currentOffset = fileset.RealOffset;
+                                break;
+                            case "Patch":
+                                rdpFile = "patch.rdp";
+                                if (!rdpStreams.ContainsKey(rdpFile))
+                                {
+                                    Console.WriteLine($"Fileset {i + 1}: [Patch] - Missing patch.rdp or dictionary, skipped.");
+                                    continue;
+                                }
+                                isRDP = true;
+                                targetWriter = rdpStreams[rdpFile].Writer;
+                                currentOffset = fileset.RealOffset;
+                                break;
+                            default:
+                                Console.WriteLine($"Fileset {i + 1}: [AddressMode={fileset.AddressMode}] - Skipped.");
+                                continue;
                         }
 
                         // Read file from filename
@@ -147,17 +216,62 @@ namespace RESExtractor
                                 newSize = newUnpackSize;
                             }
 
-                            // Write chunk at currentOffset
-                            outputStream.Seek(currentOffset, SeekOrigin.Begin);
-                            writer.Write(newChunk);
+                            if (isRDP)
+                            {
+                                // Handle RDP chunk replacement
+                                uint originalSize = fileset.Size;
+                                uint originalEOF = fileset.RealOffset + originalSize;
+
+                                if (newSize <= originalSize)
+                                {
+                                    // Smaller or equal size: write chunk and pad with zeros to original EOF
+                                    targetWriter.BaseStream.Seek(currentOffset, SeekOrigin.Begin);
+                                    targetWriter.Write(newChunk);
+                                    if (newSize < originalSize)
+                                    {
+                                        targetWriter.Write(new byte[originalSize - newSize]);
+                                    }
+                                }
+                                else
+                                {
+                                    // Larger size: check for zero-padding after original EOF
+                                    uint requiredSpace = newSize - originalSize;
+                                    bool canFit = CheckZeroPadding(rdpFile, originalEOF, requiredSpace);
+                                    if (!canFit)
+                                    {
+                                        Console.WriteLine($"Fileset {i + 1}: [RDP={rdpFile}] - New size {newSize} exceeds available space, skipped.");
+                                        continue;
+                                    }
+
+                                    // Write new chunk
+                                    targetWriter.BaseStream.Seek(currentOffset, SeekOrigin.Begin);
+                                    targetWriter.Write(newChunk);
+                                }
+                            }
+                            else
+                            {
+                                // Write chunk to .res file
+                                outputStream.Seek(currentOffset, SeekOrigin.Begin);
+                                targetWriter.Write(newChunk);
+                            }
 
                             // Update Fileset properties
                             fileset.Size = newSize;
                             fileset.UnpackSize = newUnpackSize;
-                            fileset.RealOffset = currentOffset;
-                            fileset.RawOffset = (fileset.AddressMode == "SET_C" ? SET_C_MASK : SET_D_MASK) | (currentOffset & 0x00FFFFFF);
+                            if (!isRDP)
+                            {
+                                // Update offsets for .res file (SET_C/SET_D)
+                                fileset.RealOffset = currentOffset;
+                                fileset.RawOffset = (fileset.AddressMode == "SET_C" ? SET_C_MASK : SET_D_MASK) | (currentOffset & 0x00FFFFFF);
+                            }
 
-                            // Update Fileset in output stream
+                            // Store size for shared realOffset in RDP files
+                            if (isRDP)
+                            {
+                                rdpSharedOffsets[rdpFile][fileset.RealOffset] = (newSize, newUnpackSize);
+                            }
+
+                            // Update Fileset in .res output stream
                             long filesetOffset = 0x60 + (i * 32);
                             outputStream.Seek(filesetOffset, SeekOrigin.Begin);
                             writer.Write(fileset.RawOffset); // 4 bytes
@@ -168,16 +282,20 @@ namespace RESExtractor
                             writer.Write(fileset.UnpackSize); // 4 bytes
 
                             // Log replacement
-                            Console.WriteLine($"Fileset {i + 1}: Replaced chunk at 0x{currentOffset:X8}, Size={newSize} bytes, UnpackSize={newUnpackSize} bytes, Compressed={isCompressed}, File={filename}");
+                            Console.WriteLine($"Fileset {i + 1}: Replaced chunk at 0x{currentOffset:X8} in {(isRDP ? rdpFile : ".res file")}, Size={newSize} bytes, UnpackSize={newUnpackSize} bytes, Compressed={isCompressed}, File={filename}");
 
-                            // Calculate next offset with 0x10 alignment
-                            currentOffset += newSize;
-                            uint padding = (16 - (currentOffset % 16)) % 16;
-                            if (padding > 0)
+                            // Update offset for .res file
+                            // Calculation of alignment still applies here
+                            if (!isRDP)
                             {
-                                outputStream.Seek(currentOffset, SeekOrigin.Begin);
-                                writer.Write(new byte[padding]);
-                                currentOffset += padding;
+                                currentResOffset += newSize;
+                                uint padding = (16 - (currentResOffset % 16)) % 16;
+                                if (padding > 0)
+                                {
+                                    outputStream.Seek(currentResOffset, SeekOrigin.Begin);
+                                    writer.Write(new byte[padding]);
+                                    currentResOffset += padding;
+                                }
                             }
                         }
                         catch (Exception ex)
@@ -187,8 +305,50 @@ namespace RESExtractor
                         }
                     }
 
+                    // Update Filesets in RDP files
+                    foreach (var rdp in rdpSharedOffsets.Keys)
+                    {
+                        foreach (var kvp in rdpSharedOffsets[rdp])
+                        {
+                            uint realOffset = kvp.Key;
+                            var (size, unpackSize) = kvp.Value;
+                            for (int i = 0; i < _resFile.Filesets.Count; i++)
+                            {
+                                var fileset = _resFile.Filesets[i];
+                                if ((fileset.AddressMode == "Package" && rdp == "package.rdp" ||
+                                     fileset.AddressMode == "Data" && rdp == "data.rdp" ||
+                                     fileset.AddressMode == "Patch" && rdp == "patch.rdp") &&
+                                    fileset.RealOffset == realOffset)
+                                {
+                                    fileset.Size = size;
+                                    fileset.UnpackSize = unpackSize;
+                                    long filesetOffset = 0x60 + (i * 32);
+                                    outputStream.Seek(filesetOffset, SeekOrigin.Begin);
+                                    writer.Write(fileset.RawOffset); // 4 bytes
+                                    writer.Write(fileset.Size); // 4 bytes
+                                    writer.Write(fileset.OffsetName); // 4 bytes
+                                    writer.Write(fileset.ChunkName); // 4 bytes
+                                    writer.Write(new byte[12]); // 12 bytes padding
+                                    writer.Write(fileset.UnpackSize); // 4 bytes
+                                    Console.WriteLine($"Fileset {i + 1}: Updated shared realOffset 0x{realOffset:X8} in {rdp}, Size={size}, UnpackSize={unpackSize}");
+                                }
+                            }
+                        }
+                    }
+
+                    // Close streams
+                    foreach (var rdp in rdpStreams.Values)
+                    {
+                        rdp.Writer.Dispose();
+                        rdp.Stream.Dispose();
+                        Console.WriteLine($"Repacked RDP file saved to {rdp.OutputPath}");
+                    }
+
                     // Writing the output file
-                    string outputResFile = Path.ChangeExtension(_inputResFile, "_repacked.res");
+                    string outputResFile = Path.Combine(
+                        Path.GetDirectoryName(_inputResFile) ?? string.Empty,
+                        Path.GetFileNameWithoutExtension(_inputResFile) + "_repacked.res"
+                    );
                     File.WriteAllBytes(outputResFile, outputStream.ToArray());
                     Console.WriteLine($"Repacking complete. Output saved to {outputResFile}");
                 }
@@ -197,6 +357,112 @@ namespace RESExtractor
             {
                 Console.WriteLine($"Error repacking files: {ex.Message}");
                 throw;
+            }
+        }
+
+        private Dictionary<string, List<RDPDictionaryEntry>> LoadRDPDictionaries()
+        {
+            var dictionaries = new Dictionary<string, List<RDPDictionaryEntry>>();
+            string[] rdpFiles = { "packageDict.json", "dataDict.json", "patchDict.json" };
+            string[] rdpNames = { "package.rdp", "data.rdp", "patch.rdp" };
+
+            for (int i = 0; i < rdpFiles.Length; i++)
+            {
+                string jsonPath = rdpFiles[i];
+                string rdpName = rdpNames[i];
+                if (!File.Exists(jsonPath))
+                {
+                    Console.WriteLine($"Dictionary {jsonPath} not found, skipping {rdpName}.");
+                    continue;
+                }
+
+                try
+                {
+                    string jsonContent = File.ReadAllText(jsonPath);
+                    var entries = JsonSerializer.Deserialize<List<RDPDictionaryEntry>>(jsonContent, new JsonSerializerOptions
+                    {
+                        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                    });
+
+                    if (entries == null || entries.Count == 0)
+                    {
+                        Console.WriteLine($"Dictionary {jsonPath} is empty, skipping {rdpName}.");
+                        continue;
+                    }
+
+                    dictionaries[rdpName] = entries.OrderBy(e => e.Index).ToList();
+                    Console.WriteLine($"Loaded dictionary {jsonPath} with {entries.Count} entries for {rdpName}.");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to load dictionary {jsonPath}: {ex.Message}, skipping {rdpName}.");
+                }
+            }
+
+            return dictionaries;
+        }
+
+        private Dictionary<string, (FileStream Stream, BinaryWriter Writer, string OutputPath)> PrepareRDPStreams()
+        {
+            var streams = new Dictionary<string, (FileStream, BinaryWriter, string)>();
+            string[] rdpFiles = { "package.rdp", "data.rdp", "patch.rdp" };
+
+            foreach (var rdpFile in rdpFiles)
+            {
+                if (!File.Exists(rdpFile))
+                {
+                    Console.WriteLine($"RDP file {rdpFile} not found, skipping.");
+                    continue;
+                }
+
+                string outputRdpFile = Path.Combine(
+                    Path.GetDirectoryName(rdpFile) ?? string.Empty,
+                    Path.GetFileNameWithoutExtension(rdpFile) + "_new.rdp"
+                );
+
+                try
+                {
+                    // Copy original RDP file to new file
+                    File.Copy(rdpFile, outputRdpFile, true);
+                    var stream = new FileStream(outputRdpFile, FileMode.Open, FileAccess.ReadWrite);
+                    var writer = new BinaryWriter(stream);
+                    streams[rdpFile] = (stream, writer, outputRdpFile);
+                    Console.WriteLine($"Prepared RDP stream for {outputRdpFile}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to prepare RDP stream for {outputRdpFile}: {ex.Message}, skipping.");
+                }
+            }
+
+            return streams;
+        }
+
+        private bool CheckZeroPadding(string rdpFile, uint startOffset, uint requiredSpace)
+        {
+            try
+            {
+                using (var stream = new FileStream(rdpFile, FileMode.Open, FileAccess.Read))
+                using (var reader = new BinaryReader(stream))
+                {
+                    stream.Seek(startOffset, SeekOrigin.Begin);
+                    uint zerosFound = 0;
+
+                    while (zerosFound < requiredSpace && stream.Position < stream.Length)
+                    {
+                        byte b = reader.ReadByte();
+                        if (b != 0)
+                            return false;
+                        zerosFound++;
+                    }
+
+                    return zerosFound >= requiredSpace;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error checking zero padding in {rdpFile} at 0x{startOffset:X8}: {ex.Message}");
+                return false;
             }
         }
 
@@ -241,15 +507,15 @@ namespace RESExtractor
             if (_resFile.Configs != _jsonData.Configs)
                 throw new InvalidDataException($"Configs mismatch: RES=0x{_resFile.Configs:X8}, JSON=0x{_jsonData.Configs:X8}");
 
-           /* DEBUG
-            Console.WriteLine("Header validated successfully:");
-            Console.WriteLine($"  MagicHeader: 0x{_resFile.MagicHeader:X8}");
-            Console.WriteLine($"  GroupOffset: 0x{_resFile.GroupOffset:X8}");
-            Console.WriteLine($"  GroupCount: {_resFile.GroupCount}");
-            Console.WriteLine($"  UNK1: 0x{_resFile.UNK1:X8}");
-            Console.WriteLine($"  Configs: 0x{_resFile.Configs:X8}");
-            Console.WriteLine();
-           */
+            /* DEBUG
+             Console.WriteLine("Header validated successfully:");
+             Console.WriteLine($"  MagicHeader: 0x{_resFile.MagicHeader:X8}");
+             Console.WriteLine($"  GroupOffset: 0x{_resFile.GroupOffset:X8}");
+             Console.WriteLine($"  GroupCount: {_resFile.GroupCount}");
+             Console.WriteLine($"  UNK1: 0x{_resFile.UNK1:X8}");
+             Console.WriteLine($"  Configs: 0x{_resFile.Configs:X8}");
+             Console.WriteLine();
+            */
 
             // Validate DataSets
             if (_resFile.DataSets.Count != _jsonData.DataSets.Count || _resFile.DataSets.Count != 8)
@@ -262,7 +528,7 @@ namespace RESExtractor
                 if (resDataSet.Offset != jsonDataSet.Offset || resDataSet.Count != jsonDataSet.Count)
                     throw new InvalidDataException($"DataSet {i + 1} mismatch: RES Offset=0x{resDataSet.Offset:X8}, Count={resDataSet.Count}; JSON Offset=0x{jsonDataSet.Offset:X8}, Count={jsonDataSet.Count}");
 
-             // DBG   Console.WriteLine($"DataSet {i + 1}: Offset=0x{resDataSet.Offset:X8}, Count={resDataSet.Count}");
+                // DBG   Console.WriteLine($"DataSet {i + 1}: Offset=0x{resDataSet.Offset:X8}, Count={resDataSet.Count}");
             }
             Console.WriteLine();
 
@@ -330,13 +596,13 @@ namespace RESExtractor
                 {
                     // DBG   Console.WriteLine("  Names:");
                     for (int j = 0; j < resFileset.Names.Length; j++) ;
-                     // DBG   Console.WriteLine($"    [{j}]: {resFileset.Names[j]}");
+                    // DBG   Console.WriteLine($"    [{j}]: {resFileset.Names[j]}");
                 }
                 if (resFileset.NamesPointer != null && resFileset.NamesPointer.Length > 0)
                 {
                     // DBG Console.WriteLine("  NamesPointer:");
                     for (int j = 0; j < resFileset.NamesPointer.Length; j++) ;
-                     // DBG   Console.WriteLine($"    [{j}]: 0x{resFileset.NamesPointer[j]:X8}");
+                    // DBG   Console.WriteLine($"    [{j}]: 0x{resFileset.NamesPointer[j]:X8}");
                 }
             }
 

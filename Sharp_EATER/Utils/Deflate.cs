@@ -1,7 +1,4 @@
-﻿/* Lmao this took me a day to properly implement something like this
- * to make GOD EATER 2 (PSP) literally accept this compression
- * i was looking for other compression methods. And i almost gave up
- */
+﻿// Code is based on BLOCKZIP, just reused here.
 
 
 /* Order after compression: 
@@ -99,8 +96,8 @@ public static class Compression
             byte[] compressedData = compressedStream.ToArray();
 
 
-            // I had to revamp this area multiple times, just to make it more compatible to the game
-            // Converted length to signed 16-bit (short) and store in Little Endian
+
+            // Convert length to signed 16-bit (short) and store in Little Endian
             // Ensures Little Endian format on this one.
 
             short signedLength = (short)compressedData.Length; // Convert to signed short
