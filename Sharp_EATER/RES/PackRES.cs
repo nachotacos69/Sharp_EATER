@@ -74,9 +74,9 @@ namespace RESExtractor
                 // Load RDP dictionaries
                 var rdpDictionaries = LoadRDPDictionaries();
 
-                // Initialize expandable MemoryStream for .res file
+                // Initialize expandable MemoryStream with initial capacity
                 byte[] originalResData = File.ReadAllBytes(_inputResFile);
-                using (MemoryStream outputStream = new MemoryStream())
+                using (MemoryStream outputStream = new MemoryStream((int)(originalResData.Length * 1.5))) // Buffer for expected growth
                 {
                     // Copy original data to start
                     outputStream.Write(originalResData, 0, originalResData.Length);
@@ -90,7 +90,18 @@ namespace RESExtractor
                         writer.Write(_jsonData.UNK1); // 4 bytes
                         writer.Write(new byte[3]); // 3 bytes padding
                         writer.Write(_jsonData.Configs); // 4 bytes
-                        writer.Write(new byte[12]); // 12 bytes padding
+                        // Check original header for non-zero padding (bytes 20-31)
+                        byte[] originalPadding = originalResData.Skip(20).Take(12).ToArray();
+                        if (originalPadding.Any(b => b != 0))
+                        {
+                            writer.Write(originalPadding); // Preserve original non-zero data
+                            Console.WriteLine("Header: Preserved original non-zero padding bytes 20-31.");
+                        }
+                        else
+                        {
+                            writer.Write(new byte[12]); // 12 bytes zero padding
+                            Console.WriteLine("Header: Wrote 12 bytes zero padding at bytes 20-31.");
+                        }
 
                         // Update DataSets at GroupOffset (8 bytes each, 8 groups)
                         outputStream.Seek(_jsonData.GroupOffset, SeekOrigin.Begin);
@@ -114,7 +125,7 @@ namespace RESExtractor
                         }
 
                         // Prepare RDP file streams
-                        // i meant to do a  memory load but i can't risk longer waiting times 
+                        // i meant to do a memory load but i can't risk longer waiting times 
                         Dictionary<string, (FileStream Stream, BinaryWriter Writer, string OutputPath)> rdpStreams = PrepareRDPStreams();
 
                         // Track Filesets that share realOffset for RDP files
@@ -122,10 +133,10 @@ namespace RESExtractor
                         foreach (var rdp in rdpStreams.Keys)
                             rdpSharedOffsets[rdp] = new Dictionary<uint, (uint, uint)>();
 
-                        // Track new offsets for SET_C/SET_D Filesets
-                        Dictionary<int, (uint RealOffset, uint RawOffset)> newOffsets = new Dictionary<int, (uint, uint)>();
+                        // Track chunk locations from mapping
+                        var chunkLocations = _chunkLocations; // Set during ValidateAndMap
 
-                        // Replace chunks for SET_C, SET_D, Package, Data, and Patch Filesets
+                        // Replace or copy chunks for all Filesets in a single pass
                         uint currentResOffset = _jsonData.Configs; // Start at Configs offset for .res file
                         for (int i = 0; i < _resFile.Filesets.Count; i++)
                         {
@@ -193,46 +204,121 @@ namespace RESExtractor
                                     continue;
                             }
 
-                            // Read file from filename
-                            string filename = jsonFileset.Filename;
-                            if (string.IsNullOrEmpty(filename) || !File.Exists(filename))
-                            {
-                                Console.WriteLine($"Fileset {i + 1}: [Missing or invalid filename: {filename}] - Skipped.");
-                                continue;
-                            }
-
-                            byte[] newChunk;
+                            byte[] chunk;
                             uint newSize;
                             uint newUnpackSize;
-                            bool isCompressed = jsonFileset.Compressed ?? false;
 
-                            try
+                            if (!isRDP && !string.IsNullOrEmpty(jsonFileset.Filename) && File.Exists(jsonFileset.Filename))
                             {
-                                byte[] rawData = File.ReadAllBytes(filename);
-                                newUnpackSize = (uint)rawData.Length;
+                                // Repack new chunk from filename
+                                string filename = jsonFileset.Filename;
+                                bool isCompressed = jsonFileset.Compressed ?? false;
 
-                                if (isCompressed)
+                                try
                                 {
-                                    newChunk = Compression.LeCompression(rawData);
-                                    newSize = (uint)newChunk.Length;
+                                    byte[] rawData = File.ReadAllBytes(filename);
+                                    newUnpackSize = (uint)rawData.Length;
+
+                                    if (isCompressed)
+                                    {
+                                        chunk = Compression.LeCompression(rawData);
+                                        newSize = (uint)chunk.Length;
+                                    }
+                                    else
+                                    {
+                                        chunk = rawData;
+                                        newSize = newUnpackSize;
+                                    }
+
+                                    // Ensure MemoryStream capacity
+                                    long requiredCapacity = currentOffset + newSize;
+                                    if (requiredCapacity > outputStream.Capacity)
+                                    {
+                                        outputStream.Capacity = (int)requiredCapacity;
+                                    }
+
+                                    // Write chunk to .res file
+                                    outputStream.Seek(currentOffset, SeekOrigin.Begin);
+                                    targetWriter.Write(chunk);
+
+                                    // Update Fileset properties
+                                    fileset.Size = newSize;
+                                    fileset.UnpackSize = newUnpackSize;
+                                    fileset.RealOffset = currentOffset;
+                                    fileset.RawOffset = (fileset.AddressMode == "SET_C" ? SET_C_MASK : SET_D_MASK) | (currentOffset & 0x00FFFFFF);
+
+                                    // Log replacement
+                                    Console.WriteLine($"Fileset {i + 1}: Replaced chunk at 0x{currentOffset:X8} in .res file, Size={newSize} bytes, UnpackSize={newUnpackSize} bytes, Compressed={isCompressed}, File={filename}");
                                 }
-                                else
+                                catch (Exception ex)
                                 {
-                                    newChunk = rawData;
-                                    newSize = newUnpackSize;
+                                    Console.WriteLine($"Fileset {i + 1}: Failed to process {filename}. Error: {ex.Message}");
+                                    continue;
+                                }
+                            }
+                            else if (!isRDP)
+                            {
+                                // Copy original chunk
+                                uint originalOffset = chunkLocations.ContainsKey(i) ? chunkLocations[i].RealOffset : fileset.RealOffset;
+                                newSize = fileset.Size;
+                                newUnpackSize = fileset.UnpackSize;
+
+                                if (newSize == 0)
+                                {
+                                    Console.WriteLine($"Fileset {i + 1}: [Zero size] - Skipped.");
+                                    continue;
                                 }
 
-                                if (isRDP)
+                                // Ensure capacity
+                                long requiredCapacity = currentOffset + newSize;
+                                if (requiredCapacity > outputStream.Capacity)
                                 {
-                                    // Handle RDP chunk replacement
-                                    uint originalSize = fileset.Size;
-                                    uint originalEOF = fileset.RealOffset + originalSize;
+                                    outputStream.Capacity = (int)requiredCapacity;
+                                }
+
+                                // Read original chunk
+                                chunk = new byte[newSize];
+                                Array.Copy(originalResData, originalOffset, chunk, 0, newSize);
+
+                                // Write to new offset
+                                outputStream.Seek(currentOffset, SeekOrigin.Begin);
+                                targetWriter.Write(chunk);
+
+                                // Update Fileset properties
+                                fileset.RealOffset = currentOffset;
+                                fileset.RawOffset = (fileset.AddressMode == "SET_C" ? SET_C_MASK : SET_D_MASK) | (currentOffset & 0x00FFFFFF);
+
+                                // Log copying
+                                Console.WriteLine($"Fileset {i + 1}: Copied original chunk to 0x{currentOffset:X8}, Size={newSize} bytes");
+                            }
+                            else
+                            {
+                                // Handle RDP chunk replacement
+                                uint originalSize = fileset.Size;
+                                uint originalEOF = fileset.RealOffset + originalSize;
+                                bool isCompressed = jsonFileset.Compressed ?? false;
+
+                                try
+                                {
+                                    byte[] rawData = File.ReadAllBytes(jsonFileset.Filename);
+                                    newUnpackSize = (uint)rawData.Length;
+
+                                    if (isCompressed)
+                                    {
+                                        chunk = Compression.LeCompression(rawData);
+                                        newSize = (uint)chunk.Length;
+                                    }
+                                    else
+                                    {
+                                        chunk = rawData;
+                                        newSize = newUnpackSize;
+                                    }
 
                                     if (newSize <= originalSize)
                                     {
                                         // Smaller or equal size: write chunk and pad with zeros to original EOF
                                         targetWriter.BaseStream.Seek(currentOffset, SeekOrigin.Begin);
-                                        targetWriter.Write(newChunk);
+                                        targetWriter.Write(chunk);
                                         if (newSize < originalSize)
                                         {
                                             targetWriter.Write(new byte[originalSize - newSize]);
@@ -251,79 +337,55 @@ namespace RESExtractor
 
                                         // Write new chunk
                                         targetWriter.BaseStream.Seek(currentOffset, SeekOrigin.Begin);
-                                        targetWriter.Write(newChunk);
-                                    }
-                                }
-                                else
-                                {
-                                    // Ensure MemoryStream can accommodate new chunk
-                                    long requiredCapacity = currentOffset + newSize;
-                                    if (requiredCapacity > outputStream.Capacity)
-                                    {
-                                        outputStream.Capacity = (int)Math.Max(outputStream.Capacity * 2, requiredCapacity);
+                                        targetWriter.Write(chunk);
                                     }
 
-                                    // Write chunk to .res file
-                                    outputStream.Seek(currentOffset, SeekOrigin.Begin);
-                                    targetWriter.Write(newChunk);
-                                }
-
-                                // Update Fileset properties
-                                fileset.Size = newSize;
-                                fileset.UnpackSize = newUnpackSize;
-                                if (!isRDP)
-                                {
-                                    // Update offsets for .res file (SET_C/SET_D)
-                                    fileset.RealOffset = currentOffset;
-                                    fileset.RawOffset = (fileset.AddressMode == "SET_C" ? SET_C_MASK : SET_D_MASK) | (currentOffset & 0x00FFFFFF);
-                                    newOffsets[i] = (fileset.RealOffset, fileset.RawOffset);
-                                }
-
-                                // Store size for shared realOffset in RDP files
-                                if (isRDP)
-                                {
+                                    // Update Fileset properties
+                                    fileset.Size = newSize;
+                                    fileset.UnpackSize = newUnpackSize;
                                     rdpSharedOffsets[rdpFile][fileset.RealOffset] = (newSize, newUnpackSize);
+
+                                    // Log replacement
+                                    Console.WriteLine($"Fileset {i + 1}: Replaced chunk at 0x{currentOffset:X8} in {rdpFile}, Size={newSize} bytes, UnpackSize={newUnpackSize} bytes, Compressed={isCompressed}, File={jsonFileset.Filename}");
                                 }
-
-                                // Update Fileset in .res output stream
-                                long filesetOffset = 0x60 + (i * 32);
-                                outputStream.Seek(filesetOffset, SeekOrigin.Begin);
-                                writer.Write(fileset.RawOffset); // 4 bytes
-                                writer.Write(fileset.Size); // 4 bytes
-                                writer.Write(fileset.OffsetName); // 4 bytes
-                                writer.Write(fileset.ChunkName); // 4 bytes
-                                writer.Write(new byte[12]); // 12 bytes padding
-                                writer.Write(fileset.UnpackSize); // 4 bytes
-
-                                // Log replacement
-                                Console.WriteLine($"Fileset {i + 1}: Replaced chunk at 0x{currentOffset:X8} in {(isRDP ? rdpFile : ".res file")}, Size={newSize} bytes, UnpackSize={newUnpackSize} bytes, Compressed={isCompressed}, File={filename}");
-
-                                // Update offset for .res file
-                                if (!isRDP)
+                                catch (Exception ex)
                                 {
-                                    currentResOffset += newSize;
-                                    uint padding = (16 - (currentResOffset % 16)) % 16;
-                                    if (padding > 0)
-                                    {
-                                        // Ensure capacity for padding
-                                        if (currentResOffset + padding > outputStream.Capacity)
-                                        {
-                                            outputStream.Capacity = (int)(currentResOffset + padding);
-                                        }
-                                        outputStream.Seek(currentResOffset, SeekOrigin.Begin);
-                                        writer.Write(new byte[padding]);
-                                        currentResOffset += padding;
-                                    }
+                                    Console.WriteLine($"Fileset {i + 1}: Failed to process {jsonFileset.Filename}. Error: {ex.Message}");
+                                    continue;
                                 }
                             }
-                            catch (Exception ex)
+
+                            // Update Fileset in .res output stream
+                            long filesetOffset = 0x60 + (i * 32);
+                            outputStream.Seek(filesetOffset, SeekOrigin.Begin);
+                            writer.Write(fileset.RawOffset); // 4 bytes
+                            writer.Write(fileset.Size); // 4 bytes
+                            writer.Write(fileset.OffsetName); // 4 bytes
+                            writer.Write(fileset.ChunkName); // 4 bytes
+                            writer.Write(new byte[12]); // 12 bytes padding
+                            writer.Write(fileset.UnpackSize); // 4 bytes
+
+                            // Update offset for .res file
+                            if (!isRDP)
                             {
-                                Console.WriteLine($"Fileset {i + 1}: Failed to process {filename}. Error: {ex.Message}");
-                                continue;
+                                currentResOffset += newSize;
+                                uint padding = (16 - (currentResOffset % 16)) % 16;
+                                if (padding > 0)
+                                {
+                                    // Ensure capacity for padding
+                                    long requiredCapacity = currentResOffset + padding;
+                                    if (requiredCapacity > outputStream.Capacity)
+                                    {
+                                        outputStream.Capacity = (int)requiredCapacity;
+                                    }
+                                    outputStream.Seek(currentResOffset, SeekOrigin.Begin);
+                                    writer.Write(new byte[padding]);
+                                    currentResOffset += padding;
+                                }
                             }
                         }
 
-                        // Update Filesets information in RDP filesets
+                        // Update Filesets sharing realOffset in RDP files
                         foreach (var rdp in rdpSharedOffsets.Keys)
                         {
                             foreach (var kvp in rdpSharedOffsets[rdp])
@@ -350,65 +412,6 @@ namespace RESExtractor
                                         writer.Write(fileset.UnpackSize); // 4 bytes
                                         Console.WriteLine($"Fileset {i + 1}: Updated shared realOffset 0x{realOffset:X8} in {rdp}, Size={size}, UnpackSize={unpackSize}");
                                     }
-                                }
-                            }
-                        }
-
-                        // Copy remaining data for non-repacked Filesets
-                        for (int i = 0; i < _resFile.Filesets.Count; i++)
-                        {
-                            var fileset = _resFile.Filesets[i];
-                            if ((fileset.AddressMode == "SET_C" || fileset.AddressMode == "SET_D") && !newOffsets.ContainsKey(i))
-                            {
-                                // Copy original chunk to new offset
-                                uint originalOffset = fileset.RealOffset;
-                                uint size = fileset.Size;
-                                if (size == 0)
-                                    continue;
-
-                                // Ensure capacity
-                                if (currentResOffset + size > outputStream.Capacity)
-                                {
-                                    outputStream.Capacity = (int)(currentResOffset + size);
-                                }
-
-                                // Read original chunk
-                                byte[] chunk = new byte[size];
-                                Array.Copy(originalResData, originalOffset, chunk, 0, size);
-
-                                // Write to new offset
-                                outputStream.Seek(currentResOffset, SeekOrigin.Begin);
-                                writer.Write(chunk);
-
-                                // Update Fileset properties
-                                fileset.RealOffset = currentResOffset;
-                                fileset.RawOffset = (fileset.AddressMode == "SET_C" ? SET_C_MASK : SET_D_MASK) | (currentResOffset & 0x00FFFFFF);
-                                newOffsets[i] = (fileset.RealOffset, fileset.RawOffset);
-
-                                // Update Fileset in .res output stream
-                                long filesetOffset = 0x60 + (i * 32);
-                                outputStream.Seek(filesetOffset, SeekOrigin.Begin);
-                                writer.Write(fileset.RawOffset); // 4 bytes
-                                writer.Write(fileset.Size); // 4 bytes
-                                writer.Write(fileset.OffsetName); // 4 bytes
-                                writer.Write(fileset.ChunkName); // 4 bytes
-                                writer.Write(new byte[12]); // 12 bytes padding
-                                writer.Write(fileset.UnpackSize); // 4 bytes
-
-                                Console.WriteLine($"Fileset {i + 1}: Copied original chunk to 0x{currentResOffset:X8}, Size={size} bytes");
-
-                                // Update offset with padding
-                                currentResOffset += size;
-                                uint padding = (16 - (currentResOffset % 16)) % 16;
-                                if (padding > 0)
-                                {
-                                    if (currentResOffset + padding > outputStream.Capacity)
-                                    {
-                                        outputStream.Capacity = (int)(currentResOffset + padding);
-                                    }
-                                    outputStream.Seek(currentResOffset, SeekOrigin.Begin);
-                                    writer.Write(new byte[padding]);
-                                    currentResOffset += padding;
                                 }
                             }
                         }
@@ -544,6 +547,8 @@ namespace RESExtractor
             }
         }
 
+        private Dictionary<int, (uint RealOffset, uint Size)> _chunkLocations;
+
         private void Load()
         {
             // Validate input files
@@ -565,13 +570,16 @@ namespace RESExtractor
                 _resFile = new RES_PSP(reader);
             }
 
-            // Validate data
+            // Validate data and map chunks
             ValidateAndMap();
         }
 
         private void ValidateAndMap()
         {
             Console.WriteLine("=== Loading and Mapping RES File ===");
+
+            // Initialize chunk locations for SET_C/SET_D
+            _chunkLocations = new Dictionary<int, (uint RealOffset, uint Size)>();
 
             // Validate header
             if (_resFile.MagicHeader != _jsonData.MagicHeader)
@@ -610,7 +618,7 @@ namespace RESExtractor
             }
             Console.WriteLine();
 
-            // Validate Filesets
+            // Validate Filesets and map chunk locations
             if (_resFile.Filesets.Count != _jsonData.Filesets.Count)
                 throw new InvalidDataException($"Filesets count mismatch: RES={_resFile.Filesets.Count}, JSON={_jsonData.Filesets.Count}");
 
@@ -658,6 +666,12 @@ namespace RESExtractor
                         if (resFileset.NamesPointer[j] != jsonFileset.NamesPointer[j])
                             throw new InvalidDataException($"Fileset {i + 1} NamesPointer[{j}] mismatch: RES=0x{resFileset.NamesPointer[j]:X8}, JSON=0x{jsonFileset.NamesPointer[j]:X8}");
                     }
+                }
+
+                // Map chunk locations for SET_C/SET_D
+                if (resFileset.AddressMode == "SET_C" || resFileset.AddressMode == "SET_D")
+                {
+                    _chunkLocations[i] = (resFileset.RealOffset, resFileset.Size);
                 }
 
                 // Log Fileset details
