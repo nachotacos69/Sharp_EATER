@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 
-namespace RESExtractor
+namespace SharpRES
 {
     public static class Deflate
     {
@@ -12,9 +12,8 @@ namespace RESExtractor
         
         /* Decompresses a chunk that may contain single or multiple compressed C_BLOCKs.
          For multiple blocks, the first block is moved to the end after decompression.
-         Returns raw data if no 'blz2' header is present without prints/logging.
+         Returns raw data if no 'blz2' header is present without prints/logging. */
 
-        /// */
         public static byte[] DecompressChunk(byte[] chunk, out bool isCompressed)
         {
             isCompressed = false;

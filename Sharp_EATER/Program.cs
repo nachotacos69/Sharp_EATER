@@ -1,7 +1,7 @@
 ﻿using System;
 using System.IO;
 
-namespace RESExtractor
+namespace SharpRES
 {
     class Program
     {

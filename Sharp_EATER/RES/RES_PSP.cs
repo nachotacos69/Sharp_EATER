@@ -5,7 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Linq;
 
-namespace RESExtractor
+namespace SharpRES
 {
     public class RES_PSP
     {

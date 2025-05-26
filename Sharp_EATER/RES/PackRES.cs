@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 
-namespace RESExtractor
+namespace SharpRES
 {
     public class PackRES
     {
