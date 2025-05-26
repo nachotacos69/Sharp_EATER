@@ -40,7 +40,8 @@ namespace SharpRES
             public uint RealOffset { get; set; } // Processed offset after masking
             public string AddressMode { get; set; } // Type of offset (e.g., Current, RDP)
             public uint[] NamesPointer { get; set; } // Pointers to name data
-            public bool? Compressed { get; set; } // True if decompressed, false if raw, null if not extracted
+            public bool? CompressedBLZ2 { get; set; } // True if BLZ2 compressed, false if not, null if not extracted
+            public bool? CompressedBLZ4 { get; set; } // True if BLZ4 compressed, false if not, null if not extracted
             public string Filename { get; set; } // Path to extracted file
 
             // Returns an array indicating presence (true) or absence (false) of fields
@@ -202,7 +203,8 @@ namespace SharpRES
                     fs.UnpackSize,
                     NamesPointer = fs.NamesPointer?.Select(p => (uint?)p).ToArray(),
                     fs.Names,
-                    fs.Compressed,
+                    fs.CompressedBLZ2,
+                    fs.CompressedBLZ4,
                     fs.Filename
                 }).ToList()
             };

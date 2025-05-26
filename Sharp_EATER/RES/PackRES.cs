@@ -46,7 +46,8 @@ namespace SharpRES
             public uint UnpackSize { get; set; }
             public uint[] NamesPointer { get; set; }
             public string[] Names { get; set; }
-            public bool? Compressed { get; set; }
+            public bool? CompressedBLZ2 { get; set; }
+            public bool? CompressedBLZ4 { get; set; }
             public string Filename { get; set; }
         }
 
@@ -221,16 +222,22 @@ namespace SharpRES
                             byte[] newChunk;
                             uint newSize;
                             uint newUnpackSize;
-                            bool isCompressed = jsonFileset.Compressed ?? false;
+                            bool isBLZ2 = jsonFileset.CompressedBLZ2 ?? false;
+                            bool isBLZ4 = jsonFileset.CompressedBLZ4 ?? false;
 
                             try
                             {
                                 byte[] rawData = File.ReadAllBytes(filename);
                                 newUnpackSize = (uint)rawData.Length;
 
-                                if (isCompressed)
+                                if (isBLZ2)
                                 {
                                     newChunk = Compression.LeCompression(rawData);
+                                    newSize = (uint)newChunk.Length;
+                                }
+                                else if (isBLZ4)
+                                {
+                                    newChunk = BLZ4Utils.PackBLZ4Data(rawData);
                                     newSize = (uint)newChunk.Length;
                                 }
                                 else
@@ -288,6 +295,8 @@ namespace SharpRES
                                 // Update Fileset properties
                                 fileset.Size = newSize;
                                 fileset.UnpackSize = newUnpackSize;
+                                fileset.CompressedBLZ2 = isBLZ2;
+                                fileset.CompressedBLZ4 = isBLZ4;
                                 if (!isRDP)
                                 {
                                     // Update offsets for .res file (SET_C/SET_D)
@@ -313,7 +322,8 @@ namespace SharpRES
                                 writer.Write(fileset.UnpackSize); // 4 bytes
 
                                 // Log replacement
-                                Console.WriteLine($"Fileset {i + 1}: Replaced chunk at 0x{currentOffset:X8} in {(isRDP ? rdpFile : ".res file")}, Size={newSize} bytes, UnpackSize={newUnpackSize} bytes, Compressed={isCompressed}, File={filename}");
+                                string compressionType = isBLZ4 ? "BLZ4" : isBLZ2 ? "BLZ2" : "None";
+                                Console.WriteLine($"Fileset {i + 1}: Replaced chunk at 0x{currentOffset:X8} in {(isRDP ? rdpFile : ".res file")}, Size={newSize} bytes, UnpackSize={newUnpackSize} bytes, Compression={compressionType}, File={filename}");
 
                                 // Update offset for .res file
                                 if (!isRDP)
@@ -685,6 +695,7 @@ namespace SharpRES
                         if (resFileset.NamesPointer[j] != jsonFileset.NamesPointer[j])
                             throw new InvalidDataException($"Fileset {i + 1} NamesPointer[{j}] mismatch: RES=0x{resFileset.NamesPointer[j]:X8}, JSON=0x{jsonFileset.NamesPointer[j]:X8}");
                     }
+                
                     // Log Fileset details
                     /* DEBUG PRINTS
                     Console.WriteLine($"Fileset {i + 1}:");
@@ -708,9 +719,9 @@ namespace SharpRES
                         // DBG   Console.WriteLine($"    [{j}]: 0x{resFileset.NamesPointer[j]:X8}");
                     }
                 }
-
-                Console.WriteLine("=== Load and Mapping Complete ===");
             }
+
+            Console.WriteLine("=== Load and Mapping Complete ===");
         }
     }
 }

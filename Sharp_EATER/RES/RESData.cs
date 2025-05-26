@@ -117,7 +117,8 @@ namespace SharpRES
                 if (fileset.RawOffset == 0 && fileset.Size == 0 && fileset.OffsetName == 0 && fileset.ChunkName == 0)
                 {
                     Console.WriteLine($"Fileset {i + 1}: [Dummy] - Skipped extraction.");
-                    fileset.Compressed = null;
+                    fileset.CompressedBLZ2 = null;
+                    fileset.CompressedBLZ4 = null;
                     fileset.Filename = null;
                     continue;
                 }
@@ -131,7 +132,8 @@ namespace SharpRES
                         if (!_PackageRDP)
                         {
                             Console.WriteLine($"Fileset {i + 1}: [Package] - Missing package.rdp, skipped.");
-                            fileset.Compressed = null;
+                            fileset.CompressedBLZ2 = null;
+                            fileset.CompressedBLZ4 = null;
                             fileset.Filename = null;
                             continue;
                         }
@@ -142,7 +144,8 @@ namespace SharpRES
                         if (!_DataRDP)
                         {
                             Console.WriteLine($"Fileset {i + 1}: [Data] - Missing data.rdp, skipped.");
-                            fileset.Compressed = null;
+                            fileset.CompressedBLZ2 = null;
+                            fileset.CompressedBLZ4 = null;
                             fileset.Filename = null;
                             continue;
                         }
@@ -153,7 +156,8 @@ namespace SharpRES
                         if (!_PatchRDP)
                         {
                             Console.WriteLine($"Fileset {i + 1}: [Patch] - Missing patch.rdp, skipped.");
-                            fileset.Compressed = null;
+                            fileset.CompressedBLZ2 = null;
+                            fileset.CompressedBLZ4 = null;
                             fileset.Filename = null;
                             continue;
                         }
@@ -170,7 +174,8 @@ namespace SharpRES
                         break;
                     default:
                         Console.WriteLine($"Fileset {i + 1}: [Invalid Address Mode] - Skipped extraction.");
-                        fileset.Compressed = null;
+                        fileset.CompressedBLZ2 = null;
+                        fileset.CompressedBLZ4 = null;
                         fileset.Filename = null;
                         continue;
                 }
@@ -180,7 +185,8 @@ namespace SharpRES
                 if (string.IsNullOrEmpty(outputPath))
                 {
                     Console.WriteLine($"Fileset {i + 1}: [Invalid Names] - Skipped extraction.");
-                    fileset.Compressed = null;
+                    fileset.CompressedBLZ2 = null;
+                    fileset.CompressedBLZ4 = null;
                     fileset.Filename = null;
                     continue;
                 }
@@ -198,7 +204,8 @@ namespace SharpRES
                         // Create empty file
                         File.WriteAllBytes(outputPath, Array.Empty<byte>());
                         Console.WriteLine($"Fileset {i + 1}: Created empty file at {outputPath}");
-                        fileset.Compressed = false;
+                        fileset.CompressedBLZ2 = false;
+                        fileset.CompressedBLZ4 = false;
                         fileset.Filename = outputPath;
                     }
                     else
@@ -210,15 +217,28 @@ namespace SharpRES
                             chunk = reader.ReadBytes((int)fileset.Size);
                         }
 
-                        // Decompress chunk
-                        bool isCompressed;
-                        byte[] outputData = Deflate.DecompressChunk(chunk, out isCompressed);
+                        byte[] outputData;
+                        bool isBLZ2 = false;
+                        bool isBLZ4 = false;
+
+                        // Check for BLZ4 compression first
+                        if (BLZ4Utils.IsBLZ4(chunk))
+                        {
+                            outputData = BLZ4Utils.UnpackBLZ4Data(chunk);
+                            isBLZ4 = true;
+                        }
+                        else
+                        {
+                            // Try BLZ2 decompression
+                            outputData = Deflate.DecompressChunk(chunk, out isBLZ2);
+                        }
 
                         // Write output data
                         File.WriteAllBytes(outputPath, outputData);
 
                         // Set fileset properties
-                        fileset.Compressed = isCompressed;
+                        fileset.CompressedBLZ2 = isBLZ2;
+                        fileset.CompressedBLZ4 = isBLZ4;
                         fileset.Filename = outputPath;
 
                         // Add to RDP dictionary if applicable
@@ -230,8 +250,10 @@ namespace SharpRES
                         }
 
                         // Log extraction
-                        if (isCompressed)
-                            Console.WriteLine($"Fileset {i + 1}: Decompressed {chunk.Length} bytes to {outputData.Length} bytes at {outputPath}");
+                        if (isBLZ4)
+                            Console.WriteLine($"Fileset {i + 1}: Decompressed BLZ4 {chunk.Length} bytes to {outputData.Length} bytes at {outputPath}");
+                        else if (isBLZ2)
+                            Console.WriteLine($"Fileset {i + 1}: Decompressed BLZ2 {chunk.Length} bytes to {outputData.Length} bytes at {outputPath}");
                         else
                             Console.WriteLine($"Fileset {i + 1}: Extracted {chunk.Length} bytes (raw) to {outputPath}");
                     }
@@ -242,7 +264,8 @@ namespace SharpRES
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Fileset {i + 1}: Failed to extract to {outputPath}. Error: {ex.Message}");
-                    fileset.Compressed = null;
+                    fileset.CompressedBLZ2 = null;
+                    fileset.CompressedBLZ4 = null;
                     fileset.Filename = null;
                 }
             }
