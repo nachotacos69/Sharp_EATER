@@ -3,8 +3,7 @@ Created by: Yamato Nagasaki
 
 - A tool used for basic unpacking and repacking
 - It only supports single RES file though, not overall a batch/full unpacking and repacking
-- This only supports base game only, though DLC is supported but you will have to do some reassigning. A LOT
-
+- This only supports base game only, DLC is kinda hassle to do and takes time.
 
 Compatible with:
 - GOD EATER 2 PSP/Vita (NPJH50832 / PCSG00240)
