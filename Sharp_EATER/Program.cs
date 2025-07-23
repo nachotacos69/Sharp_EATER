@@ -10,7 +10,7 @@ namespace SharpRES
             // Validate command-line arguments
             if (args.Length < 2)
             {
-                Console.WriteLine("Sharp Eater by Yamato Nagasaki [Experimental Release v1]\n- A GOD EATER Tool. Used for basic single RES Unpacking/Repacking\n\n");
+                Console.WriteLine("Sharp Eater by Yamato Nagasaki [Experimental Release v1.1]\n- A GOD EATER Tool. Used for basic single RES Unpacking/Repacking\n\n");
                 Console.WriteLine("Usage for Unpacking: RESExtractor.exe -x [input.res]" +
                                     "\n--> When unpacking, it will generate some dictionaries and JSON file counterpart of that input RES file");
                 Console.WriteLine("Usage for Repacking: RESExtractor.exe -r [input.res] [input.json]" +

@@ -90,7 +90,7 @@ namespace SharpRES
                 }
 
                 if (!isValid)
-                    Console.WriteLine("  [Warning]: Required package/patch file missing.");
+                    Console.WriteLine("  [Warning]: package/data/patch files missing.");
 
                 Console.WriteLine();
             }

@@ -15,7 +15,7 @@ namespace SharpRES
         public byte GroupCount { get; private set; } // 1 byte, number of DataSet groups
         public uint UNK1 { get; private set; } // 4 bytes, undocumented
         // 3 bytes padding (skipped)
-        public uint Configs { get; private set; } // 4 bytes, offset to data chunks
+        public uint Configs { get; private set; } // 4 bytes, length of overall configuration (from header to the name structure before hitting some fileset chunks)
         // 12 bytes padding (skipped)
         // Total: 32 bytes. (4 + 4 + 1 + 4 + 3 + 4 + 12 = 32)
 
@@ -171,7 +171,7 @@ namespace SharpRES
             return (names.ToArray(), pointers);
         }
 
-        public string Serialize()
+        public string Serialize() //JSON Serialization here
         {
             var options = new JsonSerializerOptions
             {
