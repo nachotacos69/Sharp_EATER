@@ -1,4 +1,5 @@
-﻿using System;
+﻿
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -9,12 +10,13 @@ namespace SharpRES
 {
     public class PackRES
     {
-        private readonly string _inputResFile;
-        private readonly string _inputJsonFile;
-        private RES_PSP _resFile;
-        private JsonData _jsonData;
-        private readonly uint SET_C_MASK = 0xC0000000;
-        private readonly uint SET_D_MASK = 0xD0000000;
+        private readonly string _inputResFile; 
+        private readonly string _inputJsonFile; 
+        private readonly bool _enforcedInput; // Flag to enforce RDP Filesets to RES file
+        private RES_PSP _resFile; 
+        private JsonData _jsonData; 
+        private readonly uint SET_C_MASK = 0xC0000000; 
+        private readonly uint SET_D_MASK = 0xD0000000; 
 
         // JSON deserialization structure
         private class JsonData
@@ -59,10 +61,12 @@ namespace SharpRES
             public uint RealOffset { get; set; }
         }
 
-        public PackRES(string inputResFile, string inputJsonFile)
+
+        public PackRES(string inputResFile, string inputJsonFile, bool enforcedInput = false)
         {
             _inputResFile = inputResFile ?? throw new ArgumentNullException(nameof(inputResFile));
             _inputJsonFile = inputJsonFile ?? throw new ArgumentNullException(nameof(inputJsonFile));
+            _enforcedInput = enforcedInput;
         }
 
         public void Repack()
@@ -71,6 +75,9 @@ namespace SharpRES
             {
                 // Load and validate input files
                 Load();
+
+                // Determine preferred mask for enforced Filesets based on SET_C/SET_D population
+                uint preferredMask = DeterminePreferredMask();
 
                 // Load RDP dictionaries
                 var rdpDictionaries = LoadRDPDictionaries();
@@ -130,15 +137,15 @@ namespace SharpRES
                             writer.Write(fileset.UnpackSize); // 4 bytes
                         }
 
-                        // Prepare RDP file streams
-                        Dictionary<string, (FileStream Stream, BinaryWriter Writer, string OutputPath)> rdpStreams = PrepareRDPStreams();
+                        // Prepare RDP file streams (skipped if enforcing to RES)
+                        Dictionary<string, (FileStream Stream, BinaryWriter Writer, string OutputPath)> rdpStreams = _enforcedInput ? new Dictionary<string, (FileStream, BinaryWriter, string)>() : PrepareRDPStreams();
 
                         // Track Filesets that share realOffset for RDP files
                         Dictionary<string, Dictionary<uint, (uint Size, uint UnpackSize)>> rdpSharedOffsets = new Dictionary<string, Dictionary<uint, (uint, uint)>>();
                         foreach (var rdp in rdpStreams.Keys)
                             rdpSharedOffsets[rdp] = new Dictionary<uint, (uint, uint)>();
 
-                        // Track new offsets for SET_C/SET_D Filesets
+                        // Track new offsets for SET_C/SET_D Filesets (and enforced RDP Filesets)
                         Dictionary<int, (uint RealOffset, uint RawOffset)> newOffsets = new Dictionary<int, (uint, uint)>();
 
                         // Replace chunks for SET_C, SET_D, Package, Data, and Patch Filesets
@@ -166,48 +173,62 @@ namespace SharpRES
                             BinaryWriter targetWriter = writer;
                             uint currentOffset = currentResOffset;
                             bool isRDP = false;
-                            switch (fileset.AddressMode)
+                            string originalAddressMode = fileset.AddressMode;
+                            bool isEnforced = false;
+
+                            // Enforcement: Redirect Package/Data/Patch to RES file if enabled
+                            if (_enforcedInput && (fileset.AddressMode == "Package" || fileset.AddressMode == "Data" || fileset.AddressMode == "Patch"))
                             {
-                                case "SET_C":
-                                case "SET_D":
-                                    // Handled in .res file
-                                    break;
-                                case "Package":
-                                    rdpFile = "package.rdp";
-                                    if (!rdpStreams.ContainsKey(rdpFile))
-                                    {
-                                        Console.WriteLine($"Fileset {i + 1}: [Package] - Missing package.rdp or dictionary, skipped.");
+                                // Assign SET_C or SET_D based on preferred mask
+                                fileset.AddressMode = preferredMask == SET_C_MASK ? "SET_C" : "SET_D";
+                                isEnforced = true;
+                            }
+                            else
+                            {
+                                // Standard handling for non-enforced mode
+                                switch (fileset.AddressMode)
+                                {
+                                    case "SET_C":
+                                    case "SET_D":
+                                        // Handled in .res file
+                                        break;
+                                    case "Package":
+                                        rdpFile = "package.rdp";
+                                        if (!rdpStreams.ContainsKey(rdpFile))
+                                        {
+                                            Console.WriteLine($"Fileset {i + 1}: [Package] - Missing package.rdp or dictionary, skipped.");
+                                            continue;
+                                        }
+                                        isRDP = true;
+                                        targetWriter = rdpStreams[rdpFile].Writer;
+                                        currentOffset = fileset.RealOffset;
+                                        break;
+                                    case "Data":
+                                        rdpFile = "data.rdp";
+                                        if (!rdpStreams.ContainsKey(rdpFile))
+                                        {
+                                            Console.WriteLine($"Fileset {i + 1}: [Data] - Missing data.rdp or dictionary, skipped.");
+                                            continue;
+                                        }
+                                        isRDP = true;
+                                        targetWriter = rdpStreams[rdpFile].Writer;
+                                        currentOffset = fileset.RealOffset;
+                                        break;
+                                    case "Patch":
+                                        rdpFile = "patch.rdp";
+                                        if (!rdpStreams.ContainsKey(rdpFile))
+                                        {
+                                            Console.WriteLine($"Fileset {i + 1}: [Patch] - Missing patch.rdp or dictionary, skipped.");
+                                            continue;
+                                        }
+                                        isRDP = true;
+                                        targetWriter = rdpStreams[rdpFile].Writer;
+                                        currentOffset = fileset.RealOffset;
+                                        break;
+                                    default:
+                                        Console.WriteLine($"Fileset {i + 1}: [AddressMode={fileset.AddressMode}] - Skipped.");
                                         continue;
-                                    }
-                                    isRDP = true;
-                                    targetWriter = rdpStreams[rdpFile].Writer;
-                                    currentOffset = fileset.RealOffset;
-                                    break;
-                                case "Data":
-                                    rdpFile = "data.rdp";
-                                    if (!rdpStreams.ContainsKey(rdpFile))
-                                    {
-                                        Console.WriteLine($"Fileset {i + 1}: [Data] - Missing data.rdp or dictionary, skipped.");
-                                        continue;
-                                    }
-                                    isRDP = true;
-                                    targetWriter = rdpStreams[rdpFile].Writer;
-                                    currentOffset = fileset.RealOffset;
-                                    break;
-                                case "Patch":
-                                    rdpFile = "patch.rdp";
-                                    if (!rdpStreams.ContainsKey(rdpFile))
-                                    {
-                                        Console.WriteLine($"Fileset {i + 1}: [Patch] - Missing patch.rdp or dictionary, skipped.");
-                                        continue;
-                                    }
-                                    isRDP = true;
-                                    targetWriter = rdpStreams[rdpFile].Writer;
-                                    currentOffset = fileset.RealOffset;
-                                    break;
-                                default:
-                                    Console.WriteLine($"Fileset {i + 1}: [AddressMode={fileset.AddressMode}] - Skipped.");
-                                    continue;
+                                }
                             }
 
                             // Read file from filename
@@ -299,7 +320,7 @@ namespace SharpRES
                                 fileset.CompressedBLZ4 = isBLZ4;
                                 if (!isRDP)
                                 {
-                                    // Update offsets for .res file (SET_C/SET_D)
+                                    // Update offsets for .res file (SET_C/SET_D or enforced RDP)
                                     fileset.RealOffset = currentOffset;
                                     fileset.RawOffset = (fileset.AddressMode == "SET_C" ? SET_C_MASK : SET_D_MASK) | (currentOffset & 0x00FFFFFF);
                                     newOffsets[i] = (fileset.RealOffset, fileset.RawOffset);
@@ -323,9 +344,19 @@ namespace SharpRES
 
                                 // Log replacement
                                 string compressionType = isBLZ4 ? "BLZ4" : isBLZ2 ? "BLZ2" : "None";
-                                Console.WriteLine($"Fileset {i + 1}: Replaced chunk at 0x{currentOffset:X8} in {(isRDP ? rdpFile : ".res file")}, Size={newSize} bytes, UnpackSize={newUnpackSize} bytes, Compression={compressionType}, File={filename}");
+                                string logMessage = $"Fileset {i + 1}: Replaced chunk at 0x{currentOffset:X8} in {(isRDP ? rdpFile : ".res file")}, Size={newSize} bytes, UnpackSize={newUnpackSize} bytes, Compression={compressionType}, File={filename}";
+                                if (isEnforced)
+                                {
+                                    Console.ForegroundColor = ConsoleColor.Yellow;
+                                    Console.WriteLine($"[ENFORCED] {logMessage}");
+                                    Console.ForegroundColor = ConsoleColor.White;
+                                }
+                                else
+                                {
+                                    Console.WriteLine(logMessage);
+                                }
 
-                                // Update offset for .res file
+                                // Update offset for .res file with 16-byte alignment
                                 if (!isRDP)
                                 {
                                     currentResOffset += newSize;
@@ -351,7 +382,7 @@ namespace SharpRES
                             }
                         }
 
-                        // Update Filesets information in RDP filesets
+                        // Update Filesets information in RDP files for shared offsets
                         foreach (var rdp in rdpSharedOffsets.Keys)
                         {
                             foreach (var kvp in rdpSharedOffsets[rdp])
@@ -450,7 +481,7 @@ namespace SharpRES
                             }
                         }
 
-                        // Close RDP streams
+                        // Close RDP streams (if any)
                         foreach (var rdp in rdpStreams.Values)
                         {
                             rdp.Writer.Dispose();
@@ -461,7 +492,7 @@ namespace SharpRES
                         // Writing the output file
                         string outputResFile = Path.Combine(
                             Path.GetDirectoryName(_inputResFile) ?? string.Empty,
-                            Path.GetFileNameWithoutExtension(_inputResFile) + "_repacked.res"
+                            Path.GetFileNameWithoutExtension(_inputResFile) + (_enforcedInput ? "_enforced.res" : "_repacked.res")
                         );
                         File.WriteAllBytes(outputResFile, outputStream.ToArray());
                         Console.WriteLine($"Repacking complete. Output saved to {outputResFile}");
@@ -475,9 +506,24 @@ namespace SharpRES
             }
         }
 
+        /*
+         * DeterminePreferredMask: Determines whether to use SET_C or SET_D for enforced Filesets.
+         * Counts SET_C and SET_D occurrences in JSON Filesets. Returns SET_C_MASK if SET_C is
+         * more or equally common; otherwise, returns SET_D_MASK.
+         */
+        private uint DeterminePreferredMask()
+        {
+            int setCCount = _jsonData.Filesets.Count(f => f.AddressMode == "SET_C");
+            int setDCount = _jsonData.Filesets.Count(f => f.AddressMode == "SET_D");
+            return setCCount >= setDCount ? SET_C_MASK : SET_D_MASK;
+        }
+
+        /*
+         * LoadRDPDictionaries: Loads RDP dictionary files (packageDict.json, dataDict.json, patchDict.json)
+         * for non-enforced mode. Skipped dictionaries are logged but do not halt execution.
+         */
         private Dictionary<string, List<RDPDictionaryEntry>> LoadRDPDictionaries()
         {
-            // Loads RDP dictionary files (packageDict.json, dataDict.json, patchDict.json)
             var dictionaries = new Dictionary<string, List<RDPDictionaryEntry>>();
             string[] rdpFiles = { "packageDict.json", "dataDict.json", "patchDict.json" };
             string[] rdpNames = { "package.rdp", "data.rdp", "patch.rdp" };
@@ -518,9 +564,12 @@ namespace SharpRES
             return dictionaries;
         }
 
+        /*
+         * PrepareRDPStreams: Prepares FileStream and BinaryWriter for RDP files (package.rdp, data.rdp, patch.rdp).
+         * Skipped entirely if enforceRDPtoRES is true, as RDP files are not modified in enforcement mode.
+         */
         private Dictionary<string, (FileStream Stream, BinaryWriter Writer, string OutputPath)> PrepareRDPStreams()
         {
-            // Prepares file streams for RDP files (package.rdp, data.rdp, patch.rdp)
             var streams = new Dictionary<string, (FileStream, BinaryWriter, string)>();
             string[] rdpFiles = { "package.rdp", "data.rdp", "patch.rdp" };
 
@@ -555,9 +604,9 @@ namespace SharpRES
             return streams;
         }
 
+
         private bool CheckZeroPadding(string rdpFile, uint startOffset, uint requiredSpace)
         {
-            // Checks for sufficient zero padding in RDP files for larger chunks
             try
             {
                 using (var stream = new FileStream(rdpFile, FileMode.Open, FileAccess.Read))
@@ -695,9 +744,9 @@ namespace SharpRES
                         if (resFileset.NamesPointer[j] != jsonFileset.NamesPointer[j])
                             throw new InvalidDataException($"Fileset {i + 1} NamesPointer[{j}] mismatch: RES=0x{resFileset.NamesPointer[j]:X8}, JSON=0x{jsonFileset.NamesPointer[j]:X8}");
                     }
-                
-                    // Log Fileset details
-                    /* DEBUG PRINTS
+                   /*
+                    Log Fileset details
+                    DEBUG PRINTS
                     Console.WriteLine($"Fileset {i + 1}:");
                     Console.WriteLine($"  RawOffset: 0x{resFileset.RawOffset:X8}");
                     Console.WriteLine($"  AddressMode: {resFileset.AddressMode}");
@@ -705,7 +754,7 @@ namespace SharpRES
                     Console.WriteLine($"  OffsetName: 0x{resFileset.OffsetName:X8}");
                     Console.WriteLine($"  ChunkName: {resFileset.ChunkName}");
                     Console.WriteLine($"  UnpackSize: {resFileset.UnpackSize} bytes");
-                    */
+                    
                     if (resFileset.Names != null && resFileset.Names.Length > 0)
                     {
                         // DBG   Console.WriteLine("  Names:");
@@ -717,7 +766,7 @@ namespace SharpRES
                         // DBG Console.WriteLine("  NamesPointer:");
                         for (int j = 0; j < resFileset.NamesPointer.Length; j++) ;
                         // DBG   Console.WriteLine($"    [{j}]: 0x{resFileset.NamesPointer[j]:X8}");
-                    }
+                    } */
                 }
             }
 

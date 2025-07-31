@@ -1,4 +1,5 @@
-﻿using System;
+﻿
+using System;
 using System.IO;
 
 namespace SharpRES
@@ -13,8 +14,9 @@ namespace SharpRES
                 Console.WriteLine("Sharp Eater by Yamato Nagasaki [Experimental Release v1.1]\n- A GOD EATER Tool. Used for basic single RES Unpacking/Repacking\n\n");
                 Console.WriteLine("Usage for Unpacking: RESExtractor.exe -x [input.res]" +
                                     "\n--> When unpacking, it will generate some dictionaries and JSON file counterpart of that input RES file");
-                Console.WriteLine("Usage for Repacking: RESExtractor.exe -r [input.res] [input.json]" +
-                                    "\n---> When repacking, always mention the json file counterpart of that input RES file");
+                Console.WriteLine("Usage for Repacking: RESExtractor.exe -r [input.res] [input.json] [-E]" +
+                                    "\n---> When repacking, always mention the json file counterpart of that input RES file" +
+                                    "\n---> Use -E to enforce Package/Data/Patch files into RES file with SET_C/SET_D masking");
                 return;
             }
 
@@ -58,12 +60,13 @@ namespace SharpRES
                     if (args.Length < 3)
                     {
                         Console.WriteLine("Error: -r mode requires both .res and .json files.");
-                        Console.WriteLine("Usage: RESExtractor.exe -r [input.res] [input.json]");
+                        Console.WriteLine("Usage: RESExtractor.exe -r [input.res] [input.json] [-E]");
                         return;
                     }
 
                     string inputJsonFile = args[2];
-                    PackRES packer = new PackRES(inputResFile, inputJsonFile);
+                    bool enforcedInput = args.Length > 3 && args[3].ToLower() == "-e";
+                    PackRES packer = new PackRES(inputResFile, inputJsonFile, enforcedInput);
                     packer.Repack();
                 }
                 else
