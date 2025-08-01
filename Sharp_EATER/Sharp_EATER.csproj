@@ -215,6 +215,7 @@
     <Compile Include="RES\PackRES.cs" />
     <Compile Include="RES\RESData.cs" />
     <Compile Include="RES\RES_PSP.cs" />
+    <Compile Include="RES\RTBL.cs" />
     <Compile Include="Utils\BLZ4Utils.cs" />
     <Compile Include="Utils\Deflate.cs" />
     <Compile Include="Utils\Inflate.cs" />

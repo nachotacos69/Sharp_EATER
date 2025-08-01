@@ -14,15 +14,23 @@ namespace SharpRES
         private readonly bool _PatchRDP;
         private readonly string _inputResFile;
         private readonly string _outputFolder;
+        private readonly Dictionary<uint, List<string>> _packageDict;
+        private readonly Dictionary<uint, List<string>> _dataDict;
+        private readonly Dictionary<uint, List<string>> _patchDict;
 
-        public RESData(RES_PSP resFile, bool PackageRDP, bool DataRDP, bool PatchRDP, string inputResFile)
+        public RESData(RES_PSP resFile, bool PackageRDP, bool DataRDP, bool PatchRDP, string inputResFile,
+            string outputFolder = null, Dictionary<uint, List<string>> packageDict = null,
+            Dictionary<uint, List<string>> dataDict = null, Dictionary<uint, List<string>> patchDict = null)
         {
             _resFile = resFile;
             _PackageRDP = PackageRDP;
             _DataRDP = DataRDP;
             _PatchRDP = PatchRDP;
             _inputResFile = inputResFile;
-            _outputFolder = Path.GetFileNameWithoutExtension(inputResFile);
+            _outputFolder = outputFolder ?? Path.GetFileNameWithoutExtension(inputResFile);
+            _packageDict = packageDict;
+            _dataDict = dataDict;
+            _patchDict = patchDict;
         }
 
         public void PrintInformation()
@@ -95,8 +103,22 @@ namespace SharpRES
                 Console.WriteLine();
             }
 
-            // Perform extraction and dictionary generation
+            // Perform extraction and dictionary aggregation
             ExtractFiles();
+
+            // Serialize RES file to JSON for standalone extraction
+            if (_packageDict == null && _dataDict == null && _patchDict == null)
+            {
+                string jsonOutput = _resFile.Serialize();
+                var outputDir = Path.GetDirectoryName(_inputResFile);
+                string outputJsonFile = string.IsNullOrEmpty(outputDir)
+                    ? Path.GetFileNameWithoutExtension(_inputResFile) + ".json"
+                    : Path.Combine(outputDir, Path.GetFileNameWithoutExtension(_inputResFile) + ".json");
+                if (!string.IsNullOrEmpty(Path.GetDirectoryName(outputJsonFile)))
+                    Directory.CreateDirectory(Path.GetDirectoryName(outputJsonFile)); // Ensure directory exists
+                File.WriteAllText(outputJsonFile, jsonOutput);
+                Console.WriteLine($"Serialization complete. Output saved to {outputJsonFile}");
+            }
         }
 
         private void ExtractFiles()
@@ -104,10 +126,10 @@ namespace SharpRES
             Console.WriteLine("=== Extracting Files ===");
             // Track existing files to handle duplicates
             HashSet<string> existingFiles = new HashSet<string>();
-            // Dictionaries to track files by realOffset for each RDP file
-            var packageDict = new Dictionary<uint, List<string>>();
-            var dataDict = new Dictionary<uint, List<string>>();
-            var patchDict = new Dictionary<uint, List<string>>();
+            // Initialize dictionaries for standalone RES extraction
+            var packageDict = _packageDict ?? new Dictionary<uint, List<string>>();
+            var dataDict = _dataDict ?? new Dictionary<uint, List<string>>();
+            var patchDict = _patchDict ?? new Dictionary<uint, List<string>>();
 
             for (int i = 0; i < _resFile.Filesets.Count; i++)
             {
@@ -270,16 +292,24 @@ namespace SharpRES
                 }
             }
 
-            // Serialize dictionaries
-            SerializeRDPDictionaries(packageDict, "packageDict.json");
-            SerializeRDPDictionaries(dataDict, "dataDict.json");
-            SerializeRDPDictionaries(patchDict, "patchDict.json");
-
-            Console.WriteLine("=== Extraction Complete ===");
+            // Serialize dictionaries for standalone RES extraction
+            if (_packageDict == null && _dataDict == null && _patchDict == null)
+            {
+                SerializeRDPDictionaries(packageDict, "packageDict.json");
+                SerializeRDPDictionaries(dataDict, "dataDict.json");
+                SerializeRDPDictionaries(patchDict, "patchDict.json");
+            }
         }
 
         private void SerializeRDPDictionaries(Dictionary<uint, List<string>> dict, string outputFileName)
         {
+            // Skip serialization if dictionary is empty
+            if (dict.Count == 0)
+            {
+                Console.WriteLine($"Skipping {outputFileName}: No entries to serialize.");
+                return;
+            }
+
             var outputDir = Path.GetDirectoryName(_inputResFile);
             var outputPath = string.IsNullOrEmpty(outputDir) ? outputFileName : Path.Combine(outputDir, outputFileName);
 
@@ -297,6 +327,8 @@ namespace SharpRES
             };
 
             string jsonOutput = JsonSerializer.Serialize(serializedData, options);
+            if (!string.IsNullOrEmpty(Path.GetDirectoryName(outputPath)))
+                Directory.CreateDirectory(Path.GetDirectoryName(outputPath)); 
             File.WriteAllText(outputPath, jsonOutput);
             Console.WriteLine($"RDP dictionary saved to {outputPath}");
         }
@@ -311,7 +343,7 @@ namespace SharpRES
             string extension = fileset.Names.Length > 1 ? fileset.Names[1] : "";
             List<string> directories = fileset.Names.Length > 2 ? fileset.Names.Skip(2).ToList() : new List<string>();
 
-            // Prepend output folder based on input file name
+            // Prepend output folder
             directories.Insert(0, _outputFolder);
 
             // Construct directory path
