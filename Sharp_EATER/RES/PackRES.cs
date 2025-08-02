@@ -1,5 +1,4 @@
-﻿
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -10,13 +9,13 @@ namespace SharpRES
 {
     public class PackRES
     {
-        private readonly string _inputResFile; 
-        private readonly string _inputJsonFile; 
+        private readonly string _inputResFile;
+        private readonly string _inputJsonFile;
         private readonly bool _enforcedInput; // Flag to enforce RDP Filesets to RES file
-        private RES_PSP _resFile; 
-        private JsonData _jsonData; 
-        private readonly uint SET_C_MASK = 0xC0000000; 
-        private readonly uint SET_D_MASK = 0xD0000000; 
+        private RES_PSP _resFile;
+        private JsonData _jsonData;
+        private readonly uint SET_C_MASK = 0xC0000000;
+        private readonly uint SET_D_MASK = 0xD0000000;
 
         // JSON deserialization structure
         private class JsonData
@@ -61,7 +60,6 @@ namespace SharpRES
             public uint RealOffset { get; set; }
         }
 
-
         public PackRES(string inputResFile, string inputJsonFile, bool enforcedInput = false)
         {
             _inputResFile = inputResFile ?? throw new ArgumentNullException(nameof(inputResFile));
@@ -92,8 +90,7 @@ namespace SharpRES
                     {
                         var jsonFileset = _jsonData.Filesets[i];
                         var fileset = _resFile.Filesets[i];
-                        if ((fileset.AddressMode == "SET_C" || fileset.AddressMode == "SET_D") &&
-                            jsonFileset.FilesetPointers.Any(p => !p))
+                        if ((fileset.AddressMode == "SET_C" || fileset.AddressMode == "SET_D"))
                         {
                             uint endOffset = fileset.RealOffset + fileset.Size;
                             maxPreservedOffset = Math.Max(maxPreservedOffset, endOffset);
@@ -155,16 +152,10 @@ namespace SharpRES
                             var fileset = _resFile.Filesets[i];
                             var jsonFileset = _jsonData.Filesets[i];
 
-                            // Skip if DataSet or any FilesetPointers are invalid/false
+                            // Skip if DataSet
                             if (fileset.AddressMode == "DataSet")
                             {
                                 Console.WriteLine($"Fileset {i + 1}: [AddressMode=DataSet] - Skipped.");
-                                continue;
-                            }
-                            if (jsonFileset.FilesetPointers.Any(p => !p))
-                            {
-                                Console.WriteLine($"Fileset {i + 1}: [Invalid FilesetPointers] - Skipped replacement, preserved at original offset 0x{fileset.RealOffset:X8}.");
-                                newOffsets[i] = (fileset.RealOffset, fileset.RawOffset);
                                 continue;
                             }
 
@@ -267,6 +258,12 @@ namespace SharpRES
                                     newSize = newUnpackSize;
                                 }
 
+                                // Preserve UnpackSize of 0 if original UnpackSize was 0 and FilesetPointers contains false
+                                if (fileset.UnpackSize == 0 && jsonFileset.FilesetPointers.Any(p => !p))
+                                {
+                                    newUnpackSize = 0;
+                                }
+
                                 if (isRDP)
                                 {
                                     // Handle RDP chunk replacement
@@ -301,16 +298,35 @@ namespace SharpRES
                                 }
                                 else
                                 {
-                                    // Ensure MemoryStream can accommodate new chunk
-                                    long requiredCapacity = currentOffset + newSize;
-                                    if (requiredCapacity > outputStream.Capacity)
+                                    // Handle .res file chunk replacement
+                                    if (newSize == fileset.Size)
                                     {
-                                        outputStream.Capacity = (int)Math.Max(outputStream.Capacity * 2, requiredCapacity);
+                                        // If new size matches original, write at original offset
+                                        outputStream.Seek(fileset.RealOffset, SeekOrigin.Begin);
+                                        targetWriter.Write(newChunk);
+                                        currentOffset = fileset.RealOffset;
                                     }
+                                    else
+                                    {
+                                        // Zero out original data at RealOffset
+                                        if (fileset.Size > 0)
+                                        {
+                                            outputStream.Seek(fileset.RealOffset, SeekOrigin.Begin);
+                                            targetWriter.Write(new byte[fileset.Size]);
+                                            Console.WriteLine($"Fileset {i + 1}: Zeroed out original data at 0x{fileset.RealOffset:X8}, Size={fileset.Size} bytes");
+                                        }
 
-                                    // Write chunk to .res file
-                                    outputStream.Seek(currentOffset, SeekOrigin.Begin);
-                                    targetWriter.Write(newChunk);
+                                        // Ensure MemoryStream can accommodate new chunk
+                                        long requiredCapacity = currentResOffset + newSize;
+                                        if (requiredCapacity > outputStream.Capacity)
+                                        {
+                                            outputStream.Capacity = (int)Math.Max(outputStream.Capacity * 2, requiredCapacity);
+                                        }
+
+                                        // Write chunk to new offset in .res file
+                                        outputStream.Seek(currentResOffset, SeekOrigin.Begin);
+                                        targetWriter.Write(newChunk);
+                                    }
                                 }
 
                                 // Update Fileset properties
@@ -413,14 +429,13 @@ namespace SharpRES
                             }
                         }
 
-                        // Copy remaining data for non-repacked Filesets, only IF FilesetPointers are valid
+                        // Copy remaining data for non-repacked Filesets
                         for (int i = 0; i < _resFile.Filesets.Count; i++)
                         {
                             var fileset = _resFile.Filesets[i];
                             var jsonFileset = _jsonData.Filesets[i];
                             if ((fileset.AddressMode == "SET_C" || fileset.AddressMode == "SET_D") &&
-                                !newOffsets.ContainsKey(i) &&
-                                !jsonFileset.FilesetPointers.Any(p => !p))
+                                !newOffsets.ContainsKey(i))
                             {
                                 // Copy original chunk to new offset
                                 uint originalOffset = fileset.RealOffset;
@@ -472,12 +487,6 @@ namespace SharpRES
                                     writer.Write(new byte[padding]);
                                     currentResOffset += padding;
                                 }
-                            }
-                            else if ((fileset.AddressMode == "SET_C" || fileset.AddressMode == "SET_D") &&
-                                     jsonFileset.FilesetPointers.Any(p => !p))
-                            {
-                                // Preserve at original offset, already handled by initial copy
-                                Console.WriteLine($"Fileset {i + 1}: Preserved original chunk at 0x{fileset.RealOffset:X8}, Size={fileset.Size} bytes");
                             }
                         }
 
@@ -603,7 +612,6 @@ namespace SharpRES
 
             return streams;
         }
-
 
         private bool CheckZeroPadding(string rdpFile, uint startOffset, uint requiredSpace)
         {
@@ -744,29 +752,29 @@ namespace SharpRES
                         if (resFileset.NamesPointer[j] != jsonFileset.NamesPointer[j])
                             throw new InvalidDataException($"Fileset {i + 1} NamesPointer[{j}] mismatch: RES=0x{resFileset.NamesPointer[j]:X8}, JSON=0x{jsonFileset.NamesPointer[j]:X8}");
                     }
-                   /*
-                    Log Fileset details
-                    DEBUG PRINTS
-                    Console.WriteLine($"Fileset {i + 1}:");
-                    Console.WriteLine($"  RawOffset: 0x{resFileset.RawOffset:X8}");
-                    Console.WriteLine($"  AddressMode: {resFileset.AddressMode}");
-                    Console.WriteLine($"  Size: {resFileset.Size} bytes");
-                    Console.WriteLine($"  OffsetName: 0x{resFileset.OffsetName:X8}");
-                    Console.WriteLine($"  ChunkName: {resFileset.ChunkName}");
-                    Console.WriteLine($"  UnpackSize: {resFileset.UnpackSize} bytes");
-                    
-                    if (resFileset.Names != null && resFileset.Names.Length > 0)
-                    {
-                        // DBG   Console.WriteLine("  Names:");
-                        for (int j = 0; j < resFileset.Names.Length; j++) ;
-                        // DBG   Console.WriteLine($"    [{j}]: {resFileset.Names[j]}");
-                    }
-                    if (resFileset.NamesPointer != null && resFileset.NamesPointer.Length > 0)
-                    {
-                        // DBG Console.WriteLine("  NamesPointer:");
-                        for (int j = 0; j < resFileset.NamesPointer.Length; j++) ;
-                        // DBG   Console.WriteLine($"    [{j}]: 0x{resFileset.NamesPointer[j]:X8}");
-                    } */
+                    /*
+                     Log Fileset details
+                     DEBUG PRINTS
+                     Console.WriteLine($"Fileset {i + 1}:");
+                     Console.WriteLine($"  RawOffset: 0x{resFileset.RawOffset:X8}");
+                     Console.WriteLine($"  AddressMode: {resFileset.AddressMode}");
+                     Console.WriteLine($"  Size: {resFileset.Size} bytes");
+                     Console.WriteLine($"  OffsetName: 0x{resFileset.OffsetName:X8}");
+                     Console.WriteLine($"  ChunkName: {resFileset.ChunkName}");
+                     Console.WriteLine($"  UnpackSize: {resFileset.UnpackSize} bytes");
+
+                     if (resFileset.Names != null && resFileset.Names.Length > 0)
+                     {
+                         // DBG   Console.WriteLine("  Names:");
+                         for (int j = 0; j < resFileset.Names.Length; j++) ;
+                         // DBG   Console.WriteLine($"    [{j}]: {resFileset.Names[j]}");
+                     }
+                     if (resFileset.NamesPointer != null && resFileset.NamesPointer.Length > 0)
+                     {
+                         // DBG Console.WriteLine("  NamesPointer:");
+                         for (int j = 0; j < resFileset.NamesPointer.Length; j++) ;
+                         // DBG   Console.WriteLine($"    [{j}]: 0x{resFileset.NamesPointer[j]:X8}");
+                     } */
                 }
             }
 
