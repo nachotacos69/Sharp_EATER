@@ -667,6 +667,10 @@ namespace SharpRES
         }
 
         private void ValidateAndMap()
+            /* Validate JSON data fields
+             * To be honest, i only did this for proper rewriting
+             * This is kind of stupid, i might revise this one.
+             */
         {
             // Validates consistency between .res file and JSON data
             Console.WriteLine("=== Loading and Mapping RES File ===");
@@ -691,6 +695,7 @@ namespace SharpRES
             Console.WriteLine($"  Configs: 0x{_resFile.Configs:X8}");
             Console.WriteLine();
            */
+
             // Validate DataSets
             if (_resFile.DataSets.Count != _jsonData.DataSets.Count || _resFile.DataSets.Count != 8)
                 throw new InvalidDataException($"DataSets count mismatch: RES={_resFile.DataSets.Count}, JSON={_jsonData.DataSets.Count}, Expected=8");
@@ -713,7 +718,7 @@ namespace SharpRES
                 var resFileset = _resFile.Filesets[i];
                 var jsonFileset = _jsonData.Filesets[i];
 
-                // Validate Fileset fields
+                
                 if (resFileset.RawOffset != jsonFileset.RawOffset)
                     throw new InvalidDataException($"Fileset {i + 1} RawOffset mismatch: RES=0x{resFileset.RawOffset:X8}, JSON=0x{jsonFileset.RawOffset:X8}");
                 if (resFileset.Size != jsonFileset.Size)
