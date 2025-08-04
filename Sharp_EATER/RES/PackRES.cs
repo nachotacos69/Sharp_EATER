@@ -113,7 +113,12 @@ namespace SharpRES
                         writer.Write(_jsonData.UNK1); // 4 bytes
                         writer.Write(new byte[3]); // 3 bytes padding
                         writer.Write(_jsonData.Configs); // 4 bytes
-                        writer.Write(new byte[12]); // 12 bytes padding
+                        writer.Write(new byte[12]);
+                        /* 12 bytes padding
+                         * to be honest, i should still add something here.
+                         * especially with the DLC RES files having important pointers and size in them. (after `jsonData.Configs`)
+                         * But due to lacking of proper information, i can't implement it well.
+                         */
 
                         // Update DataSets at GroupOffset (8 bytes each, 8 groups)
                         outputStream.Seek(_jsonData.GroupOffset, SeekOrigin.Begin);
@@ -132,7 +137,11 @@ namespace SharpRES
                             writer.Write(fileset.Size); // 4 bytes
                             writer.Write(fileset.OffsetName); // 4 bytes
                             writer.Write(fileset.ChunkName); // 4 bytes
-                            writer.Write(new byte[12]); // 12 bytes padding
+                            writer.Write(new byte[12]);
+                            /* 12 bytes padding
+                             * The game uses this area for other things.
+                             * It is the best to not tamper with it.
+                             */
                             writer.Write(fileset.UnpackSize); // 4 bytes
                         }
 

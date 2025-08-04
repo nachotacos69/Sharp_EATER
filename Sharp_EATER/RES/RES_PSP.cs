@@ -27,15 +27,19 @@ namespace SharpRES
         }
         public List<DataSet> DataSets { get; private set; }
 
-        // Fileset Data structure (32 bytes per entry)
+        
         public class Fileset
         {
+            // Fileset Structure (32 bytes per entry)
             public uint RawOffset { get; set; } // 4 bytes, raw offset with address mode
             public uint Size { get; set; } // 4 bytes, chunk size
             public uint OffsetName { get; set; } // 4 bytes, offset to name data
             public uint ChunkName { get; set; } // 4 bytes, chunk name index
-            // 12 bytes padding (skipped)
+
             public uint UnpackSize { get; set; } // 4 bytes, true size of chunk
+
+
+
             public string[] Names { get; set; } // Parsed names (name, type, directories)
             public uint RealOffset { get; set; } // Processed offset after masking
             public string AddressMode { get; set; } // Type of offset (e.g., Current, RDP)
@@ -54,6 +58,10 @@ namespace SharpRES
                     OffsetName != 0,
                     ChunkName != 0,
                     UnpackSize != 0
+                    /* I uses bools to properly track things.
+                     * This is useful when it comes to data that are zero or invalid.
+                     * Or better yet, data being empty or not part of the valid Fileset provided.
+                     */
                 };
             }
         }
@@ -102,7 +110,9 @@ namespace SharpRES
                     OffsetName = reader.ReadUInt32(),
                     ChunkName = reader.ReadUInt32()
                 };
-                reader.BaseStream.Seek(12, SeekOrigin.Current); // Skip 12 bytes padding
+                reader.BaseStream.Seek(12, SeekOrigin.Current);
+                // 12 bytes padding (skipped) 
+
                 fileset.UnpackSize = reader.ReadUInt32();
 
                 // Process offset and address mode
@@ -126,14 +136,21 @@ namespace SharpRES
             byte mode = (byte)(rawOffset >> 24);
             switch (mode)
             {
-                case 0x00: return "Reserve";
-                case 0x30: return "DataSet";
-                case 0x40: return "Package";
-                case 0x50: return "Data";
+                case 0x00: return "Reserve"; 
+                case 0x30: return "DataSet"; 
+                case 0x40: return "Package"; 
+                case 0x50: return "Data"; 
                 case 0x60: return "Patch";
                 case 0xC0: return "SET_C";
                 case 0xD0: return "SET_D";
                 default: return "Invalid";
+                    /* "Reserve" -> Used to define some files as invalid/empty
+                     * "DataSet" -> Defines some files that are within `data_` prefixes folders (this is a replacement for data.rdp)
+                     * "Package" -> Package File contains heavy data of the game (audio, cutscene and mission datas, character and enemy textures, and other things)
+                     * "Data" -> Data File contains medium data of the game (usually just textures for other characters/players, some audios, some enemy data, and other things)
+                     * "Patch" -> Patch File contains extra contents of the game (DLC)
+                     * "SET_C" or "SET_D" -> These two are usually sets of data that are local and can be found within a RES file (different per RES file)
+                     */
             }
         }
 
