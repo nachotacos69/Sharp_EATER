@@ -23,4 +23,4 @@ HaoJun/Randerion: BLZ4 Codes and other structure references
 - put a RES file in the same directory as the executable
 - use `-x` for extraction
 - use `-r` for repacking
-- use `-E` for enforcement (rarely works, used for debugging)
+- use `-E` for enforcement (rarely works, used for debugging. converts fileset RDP offsets to SET_C or SET_D masking based on population)
