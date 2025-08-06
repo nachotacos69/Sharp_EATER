@@ -23,5 +23,4 @@ HaoJun/Randerion: BLZ4 Codes and other structure references
 - put a RES file in the same directory as the executable
 - use `-x` for extraction
 - use `-r` for repacking
-- use `-E` for enforcement
-- enforcement is useful in some areas if you don't want all of the files return to the RDP file when repack and stay with the RES file.
+- use `-E` for enforcement (rarely works, used for debugging)
