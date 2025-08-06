@@ -132,11 +132,31 @@ namespace SharpRES
                         if (isReplaced)
                         {
                             byte[] rawData = File.ReadAllBytes(jsonFileset.Filename);
-                            fileset.UnpackSize = (uint)rawData.Length;
-                            if (jsonFileset.CompressedBLZ2 == true) chunkBlock.Data = Compression.LeCompression(rawData);
-                            else if (jsonFileset.CompressedBLZ4 == true) chunkBlock.Data = BLZ4Utils.PackBLZ4Data(rawData);
-                            else chunkBlock.Data = rawData;
-                            fileset.Size = (uint)chunkBlock.Data.Length;
+                            bool isCompressed = jsonFileset.CompressedBLZ2 == true || jsonFileset.CompressedBLZ4 == true;
+
+                            if (isCompressed)
+                            {
+                                fileset.UnpackSize = (uint)rawData.Length;
+                                if (jsonFileset.CompressedBLZ2 == true) chunkBlock.Data = Compression.LeCompression(rawData);
+                                else chunkBlock.Data = BLZ4Utils.PackBLZ4Data(rawData);
+                                fileset.Size = (uint)chunkBlock.Data.Length;
+                            }
+                            else // Raw data
+                            {
+                                chunkBlock.Data = rawData;
+                                fileset.Size = (uint)rawData.Length;
+                            // Some unpackSize are meant to be zero by default with no value despite being raw data
+                            // and size being present within its Fileset Structure..
+                            // so this is kind of a basic fix on this. to avoid some zero default unpacksize having value.
+                                if (_resFile.Filesets[i].UnpackSize == 0)
+                                {
+                                    fileset.UnpackSize = 0;
+                                }
+                                else
+                                {
+                                    fileset.UnpackSize = fileset.Size;
+                                }
+                            }
                         }
                         else
                         {
@@ -168,7 +188,7 @@ namespace SharpRES
                 using (var outputStream = new MemoryStream())
                 using (var writer = new BinaryWriter(outputStream))
                 {
-                    uint metadataEnd = (uint)(0x60 + _resFile.Filesets.Count * 32); // Determine where the metadata ends and content begins
+                    uint metadataEnd = (uint)(0x60 + _resFile.Filesets.Count * 32);
                     uint currentWriteHead = metadataEnd;
                     outputStream.SetLength(currentWriteHead);
 
@@ -188,19 +208,16 @@ namespace SharpRES
                             Console.WriteLine($"    -> Placing at 0x{targetOffset:X8} (Size: {block.GetSize()})");
                         }
 
-                        // Filling those gap between the current write head and the target offset with original data
                         if (targetOffset > currentWriteHead)
                         {
                             uint gapSize = targetOffset - currentWriteHead;
                             Console.WriteLine($"      -> Preserving {gapSize} bytes of unmanaged data from original file.");
-                            // Ensuring that we won't read past the end of the original file
                             if (currentWriteHead + gapSize <= originalResData.Length)
                             {
                                 writer.Write(originalResData, (int)currentWriteHead, (int)gapSize);
                             }
                             else
                             {
-                                // This case is unlikely but safe to handle
                                 writer.Write(new byte[gapSize]);
                             }
                         }
