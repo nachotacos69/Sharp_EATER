@@ -72,6 +72,7 @@ namespace SharpRES
         private class ChunkBlock : ContentBlock
         {
             public byte[] Data { get; set; }
+            public bool IsEnforced { get; set; } = false;
             public ChunkBlock() { BlockType = "Chunk"; }
             public override uint GetSize() => (uint)(Data?.Length ?? 0);
         }
@@ -124,10 +125,9 @@ namespace SharpRES
 
                     bool isSetCSD = fileset.AddressMode == "SET_C" || fileset.AddressMode == "SET_D";
 
-                    // Stage chunk data for SET_C/SET_D files
-                    if (isSetCSD && fileset.Size > 0)
+                    if (isSetCSD && (fileset.Size > 0 || !string.IsNullOrEmpty(jsonFileset.Filename)))
                     {
-                        var chunkBlock = new ChunkBlock { FilesetIndex = i, OriginalOffset = fileset.RealOffset };
+                        var chunkBlock = new ChunkBlock { FilesetIndex = i, OriginalOffset = fileset.RealOffset, IsEnforced = isEnforced };
                         bool isReplaced = !string.IsNullOrEmpty(jsonFileset.Filename) && File.Exists(jsonFileset.Filename);
                         if (isReplaced)
                         {
@@ -146,7 +146,6 @@ namespace SharpRES
                         contentBlocks.Add(chunkBlock);
                     }
 
-                    // Stage name blocks
                     if (fileset.OffsetName != 0 && jsonFileset.Names != null && jsonFileset.Names.Length > 0)
                     {
                         contentBlocks.Add(new NameBlock
@@ -158,7 +157,6 @@ namespace SharpRES
                     }
                 }
 
-                // Sort blocks by original offset to maintain file structure
                 contentBlocks = contentBlocks.OrderBy(b => b.OriginalOffset).ToList();
                 Console.WriteLine($"Staged {contentBlocks.Count} content blocks for repacking.");
 
@@ -170,26 +168,49 @@ namespace SharpRES
                 using (var outputStream = new MemoryStream())
                 using (var writer = new BinaryWriter(outputStream))
                 {
-                    // Determine where the metadata ends and content begins
-                    uint metadataEnd = (uint)(0x60 + _resFile.Filesets.Count * 32);
-                    uint currentWriteHead = Align16(metadataEnd);
+                    uint metadataEnd = (uint)(0x60 + _resFile.Filesets.Count * 32); // Determine where the metadata ends and content begins
+                    uint currentWriteHead = metadataEnd;
                     outputStream.SetLength(currentWriteHead);
 
                     foreach (var block in contentBlocks)
                     {
                         Console.WriteLine($"  Processing Fileset {block.FilesetIndex + 1} [{block.BlockType}]:");
-                        Console.WriteLine($"    Original Offset: 0x{block.OriginalOffset:X8}, Current Write Head: 0x{currentWriteHead:X8}");
 
-                        // Use original offset if possible, otherwise use current write head.
-                        uint targetOffset = Align16(Math.Max(block.OriginalOffset, currentWriteHead));
+                        uint targetOffset;
+                        if (block is ChunkBlock chunkBlock && chunkBlock.IsEnforced)
+                        {
+                            targetOffset = Align16(currentWriteHead);
+                            Console.WriteLine($"    -> Enforced block. Appending at 0x{targetOffset:X8} (Size: {block.GetSize()})");
+                        }
+                        else
+                        {
+                            targetOffset = Align16(Math.Max(block.OriginalOffset, currentWriteHead));
+                            Console.WriteLine($"    -> Placing at 0x{targetOffset:X8} (Size: {block.GetSize()})");
+                        }
+
+                        // Filling those gap between the current write head and the target offset with original data
+                        if (targetOffset > currentWriteHead)
+                        {
+                            uint gapSize = targetOffset - currentWriteHead;
+                            Console.WriteLine($"      -> Preserving {gapSize} bytes of unmanaged data from original file.");
+                            // Ensuring that we won't read past the end of the original file
+                            if (currentWriteHead + gapSize <= originalResData.Length)
+                            {
+                                writer.Write(originalResData, (int)currentWriteHead, (int)gapSize);
+                            }
+                            else
+                            {
+                                // This case is unlikely but safe to handle
+                                writer.Write(new byte[gapSize]);
+                            }
+                        }
+
                         outputStream.Seek(targetOffset, SeekOrigin.Begin);
 
-                        Console.WriteLine($"    -> Placing at 0x{targetOffset:X8} (Size: {block.GetSize()})");
-
-                        if (block is ChunkBlock chunkBlock)
+                        if (block is ChunkBlock cb)
                         {
-                            writer.Write(chunkBlock.Data);
-                            newChunkOffsets[chunkBlock.FilesetIndex] = targetOffset;
+                            writer.Write(cb.Data);
+                            newChunkOffsets[cb.FilesetIndex] = targetOffset;
                         }
                         else if (block is NameBlock nameBlock)
                         {
@@ -212,7 +233,6 @@ namespace SharpRES
                             newNameOffsets[nameBlock.FilesetIndex] = nameBlockBaseOffset;
                         }
 
-                        // Update the write head to the end of the last written block
                         currentWriteHead = (uint)outputStream.Position;
                     }
 
@@ -346,14 +366,78 @@ namespace SharpRES
 
         private Dictionary<string, List<RDPDictionaryEntry>> LoadRDPDictionaries()
         {
-            // This method is unchanged as it's not part of the core issue.
-            return new Dictionary<string, List<RDPDictionaryEntry>>(); // Simplified for brevity
+            var dictionaries = new Dictionary<string, List<RDPDictionaryEntry>>();
+            string[] rdpFiles = { "packageDict.json", "dataDict.json", "patchDict.json" };
+            string[] rdpNames = { "package.rdp", "data.rdp", "patch.rdp" };
+
+            for (int i = 0; i < rdpFiles.Length; i++)
+            {
+                string jsonPath = rdpFiles[i];
+                string rdpName = rdpNames[i];
+                if (!File.Exists(jsonPath))
+                {
+                    Console.WriteLine($"Dictionary {jsonPath} not found, skipping {rdpName}.");
+                    continue;
+                }
+
+                try
+                {
+                    string jsonContent = File.ReadAllText(jsonPath);
+                    var entries = JsonSerializer.Deserialize<List<RDPDictionaryEntry>>(jsonContent, new JsonSerializerOptions
+                    {
+                        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                    });
+
+                    if (entries == null || entries.Count == 0)
+                    {
+                        Console.WriteLine($"Dictionary {jsonPath} is empty, skipping {rdpName}.");
+                        continue;
+                    }
+
+                    dictionaries[rdpName] = entries.OrderBy(e => e.Index).ToList();
+                    Console.WriteLine($"Loaded dictionary {jsonPath} with {entries.Count} entries for {rdpName}.");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to load dictionary {jsonPath}: {ex.Message}, skipping {rdpName}.");
+                }
+            }
+
+            return dictionaries;
         }
 
         private Dictionary<string, (FileStream Stream, BinaryWriter Writer, string OutputPath)> PrepareRDPStreams()
         {
-            
-            return new Dictionary<string, (FileStream, BinaryWriter, string)>();
+            var streams = new Dictionary<string, (FileStream, BinaryWriter, string)>();
+            string[] rdpFiles = { "package.rdp", "data.rdp", "patch.rdp" };
+
+            foreach (var rdpFile in rdpFiles)
+            {
+                if (!File.Exists(rdpFile))
+                {
+                    Console.WriteLine($"RDP file {rdpFile} not found, skipping.");
+                    continue;
+                }
+
+                string outputRdpFile = Path.Combine(
+                    Path.GetDirectoryName(rdpFile) ?? string.Empty,
+                    Path.GetFileNameWithoutExtension(rdpFile) + "_new.rdp"
+                );
+
+                try
+                {
+                    File.Copy(rdpFile, outputRdpFile, true);
+                    var stream = new FileStream(outputRdpFile, FileMode.Open, FileAccess.ReadWrite);
+                    var writer = new BinaryWriter(stream);
+                    streams[rdpFile] = (stream, writer, outputRdpFile);
+                    Console.WriteLine($"Prepared RDP stream for {outputRdpFile}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to prepare RDP stream for {outputRdpFile}: {ex.Message}, skipping.");
+                }
+            }
+            return streams;
         }
         #endregion
     }
