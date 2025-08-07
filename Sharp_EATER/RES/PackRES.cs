@@ -63,31 +63,50 @@ namespace SharpRES
         #region ContentBlock_Classes
         private abstract class ContentBlock
         {
-            public int FilesetIndex { get; set; }
-            public uint OriginalOffset { get; set; }
-            public string BlockType { get; set; }
-            public abstract uint GetSize();
+            public abstract byte[] GetData(PackRES context);
         }
 
-        private class ChunkBlock : ContentBlock
+        private class ManagedBlock : ContentBlock
         {
-            public byte[] Data { get; set; }
-            public bool IsEnforced { get; set; } = false;
-            public ChunkBlock() { BlockType = "Chunk"; }
-            public override uint GetSize() => (uint)(Data?.Length ?? 0);
-        }
+            public int FilesetIndex { get; }
+            public string BlockType { get; }
+            private byte[] _data;
 
-        private class NameBlock : ContentBlock
-        {
-            public string[] Names { get; set; }
-            public NameBlock() { BlockType = "Names"; }
-            public override uint GetSize()
+            public ManagedBlock(byte[] data, int filesetIndex, string blockType)
             {
-                if (Names == null || Names.Length == 0) return 0;
-                uint pointersSize = (uint)Names.Length * 4;
-                uint stringsSize = (uint)Names.Sum(n => Encoding.Default.GetByteCount(n) + 1);
-                return pointersSize + stringsSize;
+                _data = data;
+                FilesetIndex = filesetIndex;
+                BlockType = blockType;
             }
+
+            public override byte[] GetData(PackRES context)
+            {
+                
+                if (BlockType == "Names" && _data == null)
+                {
+                    var names = context._jsonData.Filesets[FilesetIndex].Names;
+                    using (var ms = new MemoryStream())
+                    using (var writer = new BinaryWriter(ms))
+                    {
+                        // Writing placeholder pointers; they will be fixed in the final pass
+                        for (int i = 0; i < names.Length; i++) writer.Write((uint)0);
+                        foreach (var name in names)
+                        {
+                            writer.Write(Encoding.Default.GetBytes(name));
+                            writer.Write((byte)0);
+                        }
+                        _data = ms.ToArray();
+                    }
+                }
+                return _data;
+            }
+        }
+
+        private class UnmanagedBlock : ContentBlock
+        {
+            private readonly byte[] _data;
+            public UnmanagedBlock(byte[] data) { _data = data; }
+            public override byte[] GetData(PackRES context) => _data;
         }
         #endregion
 
@@ -111,9 +130,11 @@ namespace SharpRES
                 uint preferredMask = DeterminePreferredMask();
                 byte[] originalResData = File.ReadAllBytes(_inputResFile);
 
-                // --- PASS 1: STAGE ALL CONTENT BLOCKS ---
+                // --- PASS 1: STAGE MODIFIED/PRESERVED CONTENT BLOCKS ---
                 Console.WriteLine("=== Pass 1: Staging Content Blocks ===");
-                var contentBlocks = new List<ContentBlock>();
+                var stagedBlocks = new Dictionary<uint, ManagedBlock>();
+                var allOriginalOffsets = new SortedSet<uint>();
+
                 for (int i = 0; i < _resFile.Filesets.Count; i++)
                 {
                     var fileset = _resFile.Filesets[i];
@@ -122,193 +143,171 @@ namespace SharpRES
 
                     bool isEnforced = _enforcedInput && (originalAddressMode == "Package" || originalAddressMode == "Data" || originalAddressMode == "Patch");
                     if (isEnforced) fileset.AddressMode = preferredMask == SET_C_MASK ? "SET_C" : "SET_D";
-
                     bool isSetCSD = fileset.AddressMode == "SET_C" || fileset.AddressMode == "SET_D";
+
+                    if (isSetCSD && fileset.RealOffset > 0) allOriginalOffsets.Add(fileset.RealOffset);
+                    if (fileset.OffsetName > 0) allOriginalOffsets.Add(fileset.OffsetName);
 
                     if (isSetCSD && (fileset.Size > 0 || !string.IsNullOrEmpty(jsonFileset.Filename)))
                     {
-                        var chunkBlock = new ChunkBlock { FilesetIndex = i, OriginalOffset = fileset.RealOffset, IsEnforced = isEnforced };
+                        byte[] chunkData;
                         bool isReplaced = !string.IsNullOrEmpty(jsonFileset.Filename) && File.Exists(jsonFileset.Filename);
                         if (isReplaced)
                         {
                             byte[] rawData = File.ReadAllBytes(jsonFileset.Filename);
                             bool isCompressed = jsonFileset.CompressedBLZ2 == true || jsonFileset.CompressedBLZ4 == true;
-
                             if (isCompressed)
                             {
                                 fileset.UnpackSize = (uint)rawData.Length;
-                                if (jsonFileset.CompressedBLZ2 == true) chunkBlock.Data = Compression.LeCompression(rawData);
-                                else chunkBlock.Data = BLZ4Utils.PackBLZ4Data(rawData);
-                                fileset.Size = (uint)chunkBlock.Data.Length;
+                                if (jsonFileset.CompressedBLZ2 == true) chunkData = Compression.LeCompression(rawData); else chunkData = BLZ4Utils.PackBLZ4Data(rawData);
+                                fileset.Size = (uint)chunkData.Length;
                             }
-                            else // Raw data
+                            else
                             {
-                                chunkBlock.Data = rawData;
+                                chunkData = rawData;
                                 fileset.Size = (uint)rawData.Length;
-                            // Some unpackSize are meant to be zero by default with no value despite being raw data
-                            // and size being present within its Fileset Structure..
-                            // so this is kind of a basic fix on this. to avoid some zero default unpacksize having value.
-                                if (_resFile.Filesets[i].UnpackSize == 0)
-                                {
-                                    fileset.UnpackSize = 0;
-                                }
-                                else
-                                {
-                                    fileset.UnpackSize = fileset.Size;
-                                }
+                                if (_resFile.Filesets[i].UnpackSize == 0) fileset.UnpackSize = 0; else fileset.UnpackSize = fileset.Size;
+                                // Some unpackSize are meant to be zero by default with no value despite being raw data
+                                // and size being present within its Fileset Structure..
+                                // so this is kind of a basic fix on this. to avoid some zero default unpacksize having value.
                             }
                         }
                         else
                         {
-                            chunkBlock.Data = new byte[fileset.Size];
-                            Array.Copy(originalResData, (int)fileset.RealOffset, chunkBlock.Data, 0, (int)fileset.Size);
+                            chunkData = new byte[fileset.Size];
+                            Array.Copy(originalResData, (int)fileset.RealOffset, chunkData, 0, (int)fileset.Size);
                         }
-                        contentBlocks.Add(chunkBlock);
+                        uint offset = isEnforced ? 0 : fileset.RealOffset;
+                        stagedBlocks[offset] = new ManagedBlock(chunkData, i, "Chunk");
                     }
 
                     if (fileset.OffsetName != 0 && jsonFileset.Names != null && jsonFileset.Names.Length > 0)
                     {
-                        contentBlocks.Add(new NameBlock
-                        {
-                            FilesetIndex = i,
-                            OriginalOffset = fileset.OffsetName,
-                            Names = jsonFileset.Names
-                        });
+                        stagedBlocks[fileset.OffsetName] = new ManagedBlock(null, i, "Names");
                     }
                 }
+                Console.WriteLine($"Staged {stagedBlocks.Count(b => b.Key > 0)} managed content blocks for repacking.");
 
-                contentBlocks = contentBlocks.OrderBy(b => b.OriginalOffset).ToList();
-                Console.WriteLine($"Staged {contentBlocks.Count} content blocks for repacking.");
+                // --- PASS HALFWAY: BUILD THE FINAL, COMPLETE LAYOUT ---
+                var finalLayout = new List<ContentBlock>();
+                uint metadataEnd = (uint)(0x60 + _resFile.Filesets.Count * 32);
+                uint fileCursor = metadataEnd;
 
-                // --- PASS 2: WRITE CONTENT AND CALCULATE NEW OFFSETS ---
-                Console.WriteLine("\n=== Pass 2: Writing Content and Calculating Layout ===");
+                var originalOffsetsMap = allOriginalOffsets.ToDictionary(o => o, o => o);
+                var sortedOffsets = allOriginalOffsets.ToList();
+                for (int i = 0; i < sortedOffsets.Count; i++)
+                {
+                    uint start = sortedOffsets[i];
+                    uint end = (i + 1 < sortedOffsets.Count) ? sortedOffsets[i + 1] : (uint)originalResData.Length;
+                    if (start < fileCursor) continue;
+
+                    if (start > fileCursor)
+                    {
+                        finalLayout.Add(new UnmanagedBlock(originalResData.Skip((int)fileCursor).Take((int)(start - fileCursor)).ToArray()));
+                    }
+
+                    if (stagedBlocks.ContainsKey(start))
+                    {
+                        finalLayout.Add(stagedBlocks[start]);
+                    }
+                    else
+                    {
+                        finalLayout.Add(new UnmanagedBlock(originalResData.Skip((int)start).Take((int)(end - start)).ToArray()));
+                    }
+                    fileCursor = end;
+                }
+                if (fileCursor < originalResData.Length)
+                {
+                    finalLayout.Add(new UnmanagedBlock(originalResData.Skip((int)fileCursor).ToArray()));
+                }
+                // Add enforced blocks at the end
+                foreach (var enforcedBlock in stagedBlocks.Where(b => b.Key == 0))
+                {
+                    finalLayout.Add(enforcedBlock.Value);
+                }
+
+                // --- PASS 2: WRITE FINAL LAYOUT AND CALCULATE NEW OFFSETS ---
+                Console.WriteLine("\n=== Pass 2: Writing Final Layout ===");
                 var newChunkOffsets = new Dictionary<int, uint>();
                 var newNameOffsets = new Dictionary<int, uint>();
+                uint newConfigsValue = metadataEnd; // Initialize with the end of the fileset table
 
                 using (var outputStream = new MemoryStream())
                 using (var writer = new BinaryWriter(outputStream))
                 {
-                    uint metadataEnd = (uint)(0x60 + _resFile.Filesets.Count * 32);
+                    writer.Write(originalResData, 0, (int)metadataEnd);
                     uint currentWriteHead = metadataEnd;
-                    outputStream.SetLength(currentWriteHead);
 
-                    foreach (var block in contentBlocks)
+                    foreach (var block in finalLayout)
                     {
-                        Console.WriteLine($"  Processing Fileset {block.FilesetIndex + 1} [{block.BlockType}]:");
+                        currentWriteHead = Align16(currentWriteHead);
+                        outputStream.Seek(currentWriteHead, SeekOrigin.Begin);
+                        byte[] data = block.GetData(this);
 
-                        uint targetOffset;
-                        if (block is ChunkBlock chunkBlock && chunkBlock.IsEnforced)
+                        if (block is ManagedBlock managed)
                         {
-                            targetOffset = Align16(currentWriteHead);
-                            Console.WriteLine($"    -> Enforced block. Appending at 0x{targetOffset:X8} (Size: {block.GetSize()})");
-                        }
-                        else
-                        {
-                            targetOffset = Align16(Math.Max(block.OriginalOffset, currentWriteHead));
-                            Console.WriteLine($"    -> Placing at 0x{targetOffset:X8} (Size: {block.GetSize()})");
-                        }
-
-                        if (targetOffset > currentWriteHead)
-                        {
-                            uint gapSize = targetOffset - currentWriteHead;
-                            Console.WriteLine($"      -> Preserving {gapSize} bytes of unmanaged data from original file.");
-                            if (currentWriteHead + gapSize <= originalResData.Length)
+                            if (managed.BlockType == "Chunk")
                             {
-                                writer.Write(originalResData, (int)currentWriteHead, (int)gapSize);
+                                newChunkOffsets[managed.FilesetIndex] = currentWriteHead;
+                                Console.WriteLine($"  Fileset {managed.FilesetIndex + 1} [Chunk]: Wrote {data.Length} bytes at 0x{currentWriteHead:X8}");
                             }
-                            else
+                            else if (managed.BlockType == "Names")
                             {
-                                writer.Write(new byte[gapSize]);
+                                newNameOffsets[managed.FilesetIndex] = currentWriteHead;
+                                Console.WriteLine($"  Fileset {managed.FilesetIndex + 1} [Names]: Wrote {data.Length} bytes at 0x{currentWriteHead:X8}");
+                                
+                                newConfigsValue = Math.Max(newConfigsValue, currentWriteHead + (uint)data.Length);
                             }
                         }
-
-                        outputStream.Seek(targetOffset, SeekOrigin.Begin);
-
-                        if (block is ChunkBlock cb)
-                        {
-                            writer.Write(cb.Data);
-                            newChunkOffsets[cb.FilesetIndex] = targetOffset;
-                        }
-                        else if (block is NameBlock nameBlock)
-                        {
-                            var stringPointers = new List<uint>();
-                            uint nameBlockBaseOffset = targetOffset;
-                            uint currentStringDataOffset = nameBlockBaseOffset + (uint)nameBlock.Names.Length * 4;
-
-                            foreach (var name in nameBlock.Names)
-                            {
-                                stringPointers.Add(currentStringDataOffset);
-                                currentStringDataOffset += (uint)Encoding.Default.GetByteCount(name) + 1;
-                            }
-
-                            foreach (var pointer in stringPointers) writer.Write(pointer);
-                            foreach (var name in nameBlock.Names)
-                            {
-                                writer.Write(Encoding.Default.GetBytes(name));
-                                writer.Write((byte)0);
-                            }
-                            newNameOffsets[nameBlock.FilesetIndex] = nameBlockBaseOffset;
-                        }
-
+                        writer.Write(data);
                         currentWriteHead = (uint)outputStream.Position;
                     }
+
+                    // The Configs value is the aligned offset of the end of the last name block.
+                    newConfigsValue = Align16(newConfigsValue);
+                    Console.WriteLine($"\nNew calculated Configs value: 0x{newConfigsValue:X8}");
 
                     // --- PASS 3: WRITE FINAL METADATA ---
                     Console.WriteLine("\n=== Pass 3: Writing Final Metadata ===");
                     outputStream.Seek(0, SeekOrigin.Begin);
-
-                    writer.Write(_jsonData.MagicHeader);
-                    writer.Write(_jsonData.GroupOffset);
-                    writer.Write(_jsonData.GroupCount);
-                    writer.Write(_jsonData.UNK1);
-                    writer.Write(new byte[3]);
-                    writer.Write(_jsonData.Configs);
-                    writer.Write(new byte[12]);
-
+                    // Use the newly calculated Configs value
+                    writer.Write(_jsonData.MagicHeader); writer.Write(_jsonData.GroupOffset); writer.Write(_jsonData.GroupCount); writer.Write(_jsonData.UNK1); writer.Write(new byte[3]); writer.Write(newConfigsValue); writer.Write(new byte[12]);
                     outputStream.Seek(_jsonData.GroupOffset, SeekOrigin.Begin);
-                    foreach (var jsonDataSet in _jsonData.DataSets)
-                    {
-                        writer.Write(jsonDataSet.Offset);
-                        writer.Write(jsonDataSet.Count);
-                    }
+                    foreach (var ds in _jsonData.DataSets) { writer.Write(ds.Offset); writer.Write(ds.Count); }
 
                     outputStream.Seek(0x60, SeekOrigin.Begin);
                     for (int i = 0; i < _resFile.Filesets.Count; i++)
                     {
                         var fileset = _resFile.Filesets[i];
-
                         if (newNameOffsets.TryGetValue(i, out uint newNameOffset))
                         {
                             fileset.OffsetName = newNameOffset;
+                            // Fix name pointers
+                            var names = _jsonData.Filesets[i].Names;
+                            uint currentStringDataOffset = newNameOffset + (uint)names.Length * 4;
+                            long originalPos = outputStream.Position;
+                            outputStream.Seek(newNameOffset, SeekOrigin.Begin);
+                            foreach (var name in names)
+                            {
+                                writer.Write(currentStringDataOffset);
+                                currentStringDataOffset += (uint)Encoding.Default.GetByteCount(name) + 1;
+                            }
+                            outputStream.Seek(originalPos, SeekOrigin.Begin);
                         }
-
                         if (newChunkOffsets.TryGetValue(i, out uint newChunkOffset))
                         {
                             fileset.RealOffset = newChunkOffset;
                             uint mask = fileset.AddressMode == "SET_C" ? SET_C_MASK : SET_D_MASK;
                             fileset.RawOffset = (newChunkOffset == 0) ? 0 : (mask | (newChunkOffset & 0x00FFFFFF));
                         }
+                        if (fileset.Size == 0 && (fileset.AddressMode == "SET_C" || fileset.AddressMode == "SET_D")) { fileset.RealOffset = 0; fileset.RawOffset = 0; }
 
-                        if (fileset.Size == 0 && (fileset.AddressMode == "SET_C" || fileset.AddressMode == "SET_D"))
-                        {
-                            fileset.RealOffset = 0;
-                            fileset.RawOffset = 0;
-                        }
-
-                        writer.Write(fileset.RawOffset);
-                        writer.Write(fileset.Size);
-                        writer.Write(fileset.OffsetName);
-                        writer.Write(fileset.ChunkName);
-                        writer.Write(new byte[12]);
-                        writer.Write(fileset.UnpackSize);
+                        writer.Write(fileset.RawOffset); writer.Write(fileset.Size); writer.Write(fileset.OffsetName); writer.Write(fileset.ChunkName); writer.Write(new byte[12]); writer.Write(fileset.UnpackSize);
                     }
                     Console.WriteLine("Metadata and Fileset entries updated.");
 
                     // --- FINALIZE ---
-                    string outputResFile = Path.Combine(
-                        Path.GetDirectoryName(_inputResFile) ?? string.Empty,
-                        Path.GetFileNameWithoutExtension(_inputResFile) + (_enforcedInput ? "_enforced.res" : "_repacked.res")
-                    );
+                    string outputResFile = Path.Combine(Path.GetDirectoryName(_inputResFile) ?? string.Empty, Path.GetFileNameWithoutExtension(_inputResFile) + (_enforcedInput ? "_enforced.res" : "_repacked.res"));
                     File.WriteAllBytes(outputResFile, outputStream.ToArray());
                     Console.WriteLine($"\nRepacking complete. Output saved to {outputResFile}");
                 }
@@ -323,21 +322,11 @@ namespace SharpRES
         #region Load_And_Validate
         private void Load()
         {
-            if (!File.Exists(_inputResFile))
-                throw new FileNotFoundException($"Input .res file not found: {_inputResFile}");
-            if (!File.Exists(_inputJsonFile))
-                throw new FileNotFoundException($"Input .json file not found: {_inputJsonFile}");
-
+            if (!File.Exists(_inputResFile)) throw new FileNotFoundException($"Input .res file not found: {_inputResFile}");
+            if (!File.Exists(_inputJsonFile)) throw new FileNotFoundException($"Input .json file not found: {_inputJsonFile}");
             string jsonContent = File.ReadAllText(_inputJsonFile);
-            _jsonData = JsonSerializer.Deserialize<JsonData>(jsonContent, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            }) ?? throw new InvalidDataException("Failed to deserialize JSON file.");
-
-            using (BinaryReader reader = new BinaryReader(File.Open(_inputResFile, FileMode.Open)))
-            {
-                _resFile = new RES_PSP(reader);
-            }
+            _jsonData = JsonSerializer.Deserialize<JsonData>(jsonContent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }) ?? throw new InvalidDataException("Failed to deserialize JSON file.");
+            using (BinaryReader reader = new BinaryReader(File.Open(_inputResFile, FileMode.Open))) { _resFile = new RES_PSP(reader); }
             ValidateAndMap();
         }
 
@@ -349,19 +338,12 @@ namespace SharpRES
             if (_resFile.GroupCount != _jsonData.GroupCount) throw new InvalidDataException("GroupCount mismatch");
             if (_resFile.UNK1 != _jsonData.UNK1) throw new InvalidDataException("UNK1 mismatch");
             if (_resFile.Configs != _jsonData.Configs) throw new InvalidDataException("Configs mismatch");
-
             if (_resFile.DataSets.Count != _jsonData.DataSets.Count) throw new InvalidDataException("DataSets count mismatch");
-            for (int i = 0; i < _resFile.DataSets.Count; i++)
-            {
-                if (_resFile.DataSets[i].Offset != _jsonData.DataSets[i].Offset || _resFile.DataSets[i].Count != _jsonData.DataSets[i].Count)
-                    throw new InvalidDataException($"DataSet {i + 1} mismatch");
-            }
-
+            for (int i = 0; i < _resFile.DataSets.Count; i++) { if (_resFile.DataSets[i].Offset != _jsonData.DataSets[i].Offset || _resFile.DataSets[i].Count != _jsonData.DataSets[i].Count) throw new InvalidDataException($"DataSet {i + 1} mismatch"); }
             if (_resFile.Filesets.Count != _jsonData.Filesets.Count) throw new InvalidDataException("Filesets count mismatch");
             for (int i = 0; i < _resFile.Filesets.Count; i++)
             {
-                var resFs = _resFile.Filesets[i];
-                var jsonFs = _jsonData.Filesets[i];
+                var resFs = _resFile.Filesets[i]; var jsonFs = _jsonData.Filesets[i];
                 if (resFs.RawOffset != jsonFs.RawOffset) throw new InvalidDataException($"Fileset {i + 1} RawOffset mismatch");
                 if (resFs.Size != jsonFs.Size) throw new InvalidDataException($"Fileset {i + 1} Size mismatch");
                 if (resFs.OffsetName != jsonFs.OffsetName) throw new InvalidDataException($"Fileset {i + 1} OffsetName mismatch");
@@ -386,40 +368,20 @@ namespace SharpRES
             var dictionaries = new Dictionary<string, List<RDPDictionaryEntry>>();
             string[] rdpFiles = { "packageDict.json", "dataDict.json", "patchDict.json" };
             string[] rdpNames = { "package.rdp", "data.rdp", "patch.rdp" };
-
             for (int i = 0; i < rdpFiles.Length; i++)
             {
-                string jsonPath = rdpFiles[i];
-                string rdpName = rdpNames[i];
-                if (!File.Exists(jsonPath))
-                {
-                    Console.WriteLine($"Dictionary {jsonPath} not found, skipping {rdpName}.");
-                    continue;
-                }
-
+                string jsonPath = rdpFiles[i]; string rdpName = rdpNames[i];
+                if (!File.Exists(jsonPath)) { Console.WriteLine($"Dictionary {jsonPath} not found, skipping {rdpName}."); continue; }
                 try
                 {
                     string jsonContent = File.ReadAllText(jsonPath);
-                    var entries = JsonSerializer.Deserialize<List<RDPDictionaryEntry>>(jsonContent, new JsonSerializerOptions
-                    {
-                        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                    });
-
-                    if (entries == null || entries.Count == 0)
-                    {
-                        Console.WriteLine($"Dictionary {jsonPath} is empty, skipping {rdpName}.");
-                        continue;
-                    }
-
+                    var entries = JsonSerializer.Deserialize<List<RDPDictionaryEntry>>(jsonContent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+                    if (entries == null || entries.Count == 0) { Console.WriteLine($"Dictionary {jsonPath} is empty, skipping {rdpName}."); continue; }
                     dictionaries[rdpName] = entries.OrderBy(e => e.Index).ToList();
                     Console.WriteLine($"Loaded dictionary {jsonPath} with {entries.Count} entries for {rdpName}.");
                 }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Failed to load dictionary {jsonPath}: {ex.Message}, skipping {rdpName}.");
-                }
+                catch (Exception ex) { Console.WriteLine($"Failed to load dictionary {jsonPath}: {ex.Message}, skipping {rdpName}."); }
             }
-
             return dictionaries;
         }
 
@@ -427,20 +389,10 @@ namespace SharpRES
         {
             var streams = new Dictionary<string, (FileStream, BinaryWriter, string)>();
             string[] rdpFiles = { "package.rdp", "data.rdp", "patch.rdp" };
-
             foreach (var rdpFile in rdpFiles)
             {
-                if (!File.Exists(rdpFile))
-                {
-                    Console.WriteLine($"RDP file {rdpFile} not found, skipping.");
-                    continue;
-                }
-
-                string outputRdpFile = Path.Combine(
-                    Path.GetDirectoryName(rdpFile) ?? string.Empty,
-                    Path.GetFileNameWithoutExtension(rdpFile) + "_new.rdp"
-                );
-
+                if (!File.Exists(rdpFile)) { Console.WriteLine($"RDP file {rdpFile} not found, skipping."); continue; }
+                string outputRdpFile = Path.Combine(Path.GetDirectoryName(rdpFile) ?? string.Empty, Path.GetFileNameWithoutExtension(rdpFile) + "_new.rdp");
                 try
                 {
                     File.Copy(rdpFile, outputRdpFile, true);
@@ -449,10 +401,7 @@ namespace SharpRES
                     streams[rdpFile] = (stream, writer, outputRdpFile);
                     Console.WriteLine($"Prepared RDP stream for {outputRdpFile}");
                 }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Failed to prepare RDP stream for {outputRdpFile}: {ex.Message}, skipping.");
-                }
+                catch (Exception ex) { Console.WriteLine($"Failed to prepare RDP stream for {outputRdpFile}: {ex.Message}, skipping."); }
             }
             return streams;
         }
