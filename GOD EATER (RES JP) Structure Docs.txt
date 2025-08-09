@@ -1,0 +1,68 @@
+RES Structure Information
+
+
+
+====Header Information
+Magic Number (int32): Header of the file. '0x73657250' or 'Pres'.
+Group Offset (int32): pointer for the dataset.
+Group Count (int8): total count of the groups.
+Unknown (int32): not sure about this data here.
+Padding (int24): 3 bytes.
+Config (int32): overall size of the information (header to last name structure)
+DLC Info 1 (int32): a offset for specific RES file need to seek (ex: god_menu.res [patch] needs to seek god_menu.res [original]) 
+DLC Info 2 (int32): size of that specific RES file that's being seeked and use its data
+Padding (int32): 4 bytes
+--FIXED HEADER SIZE = 32 bytes
+Note: DLC Info is not available in base game.
+
+
+
+====DataSet Information
+DataSet Offset (int32): offset of where the FileSet is located.
+DataSet Count (int32): how many sets/files within that FileSet.
+--FIXED DataSet Size = 64 bytes (4 + 4 = 8 bytes * 8 groups counts = 64 bytes)
+Note: 1 group = 8 bytes. the game uses 8 groups in total.
+
+
+
+====FileSet Information
+Raw Offset (int32): offset information.
+Real Offset (int32): converting Raw Offset to Real Offset. This is the one you need to use when seeking data. (not part of the FileSet structure)
+Size (int32): size of that data.
+Offset Name (int32): offset of the Name Pointers for this FileSet.
+Chunk Name (int32): defines how many pointers for that Offset Name
+Padding: 12 bytes. game uses this for other things.
+Unpack Size (int32): true/raw size of that data when decompressed. (if not compressed, value matches as size)
+-- FIXED FileSet Size = 32 bytes (4 + 4 + 4 + 4 + 12 + 4)
+
+>>> Address Modes Masking (for Raw Offset to Real Offset Conversion)
+0x00 = Empty/Reserve
+0x30 = DataSets (default raw offset value = 0x30000000. external folder source = data_[value])
+0x40 = Package (external file source = package.rdp)
+0x50 = Data (external file source = data.rdp)
+0x60 = Patch (external file source = patch.rdp)
+0xC0 = Current (i call this SET_C)
+0xD0 = Current (i call this SET_D. same function as SET_C, but sometimes appears on different RES files)
+>> Converting Raw Offset to Real Offset requires you to remove (or skip read) the first byte (0x`XX`) of the Raw Offset value when reading it.
+- for Reserve. these stuff usually are empty files, some are valid but placed in `bin` folders. usually contain `self` modules.
+- for DataSets. they exist as folders (data_[value]). only to interact with their `size` value if you changed something with a specific file.
+- for SET_C and SET_D. their data is located within the current RES file you are reading or checking out.
+example: 0xC0001234 -> remove (0x`XX`) -> 0x00001234. the Real Offset of a SET_C is 0x00001234.
+- for Package, Data, Patch uses different external sources.
+- Converting these Raw Offset requires multiplication of offsets by 0x800.
+example:
+- if FileSet has Package Address Mode => Raw Offset -> 0x40109BFE -> remove (0x`XX`) -> 0x00109BFE * 0x800 = 0x84DFF000.
+- the Real Offset of a Package is 0x84DFF000.
+
+
+
+====Name Pointers
+Pointers (int32): these pointers leads to the fileset's actual file name.
+-- Name Pointers Size = vary, but max size is 20 bytes (4 + 4 + 4 + 4)
+Note: use Chunk Name to control the pointers you need to read.
+example:
+- if Offset Name is 0x2000, and has 3 Chunk Name value. check 0x2000, read each pointers by 4 bytes each.
+- since chunk name value equivalents to 4 bytes. so 4 bytes * 3 = 12 bytes, cut 12 bytes by 4, you get 3 pointers
+
+
+

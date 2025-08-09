@@ -144,7 +144,7 @@ namespace SharpRES
                 case 0xC0: return "SET_C";
                 case 0xD0: return "SET_D";
                 default: return "Invalid";
-                    /* "Reserve" -> Used to define some files as invalid/empty
+                    /* "Reserve" -> Used to define some files within 'bin' folders (the 'self' modules). or some just empty files.
                      * "DataSet" -> Defines some files that are within `data_` prefixes folders (this is a replacement for data.rdp)
                      * "Package" -> Package File contains heavy data of the game (audio, cutscene and mission datas, character and enemy textures, and other things)
                      * "Data" -> Data File contains medium data of the game (usually just textures for other characters/players, some audios, some enemy data, and other things)
