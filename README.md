@@ -26,15 +26,15 @@ HaoJun/Randerion: BLZ4 Codes and other structure references
 - use `-E` for enforcement (rarely works, used for debugging. converts fileset RDP offsets to SET_C or SET_D masking based on population)
 
 
-## Demonstration
-**Bullet.res**
-- Original
-
+# Demonstration (used Bullet.res for sampling)
+### Original
 <img width="1095" height="737" alt="image" src="https://github.com/user-attachments/assets/361af702-b138-48fc-bfbf-35648014fff5" />
 
-
-- Modified
-
+### Modified
 <img width="893" height="810" alt="image" src="https://github.com/user-attachments/assets/af67f736-97df-417b-9539-d0d650a2f09c" />
+
+### PSVita Version
+<img width="960" height="544" alt="2025-08-10-093256-750782" src="https://github.com/user-attachments/assets/9cf1946a-3821-4fce-b2cb-fe8ea3b60c5f" />
+
 
 
