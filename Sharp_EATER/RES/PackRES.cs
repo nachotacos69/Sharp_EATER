@@ -81,7 +81,7 @@ namespace SharpRES
 
             public override byte[] GetData(PackRES context)
             {
-                
+
                 if (BlockType == "Names" && _data == null)
                 {
                     var names = context._jsonData.Filesets[FilesetIndex].Names;
@@ -122,6 +122,52 @@ namespace SharpRES
             return (offset + 15) & ~15u;
         }
 
+        private uint GetOriginalNameBlockSize(int filesetIndex, byte[] originalResData)
+        {
+            var fileset = _resFile.Filesets[filesetIndex];
+            if (fileset.OffsetName == 0 || fileset.ChunkName == 0)
+            {
+                return 0;
+            }
+
+            using (var ms = new MemoryStream(originalResData))
+            using (var reader = new BinaryReader(ms))
+            {
+                reader.BaseStream.Seek(fileset.OffsetName, SeekOrigin.Begin);
+
+                uint[] pointers = new uint[fileset.ChunkName];
+                uint maxPointer = 0;
+                for (int i = 0; i < fileset.ChunkName; i++)
+                {
+                    pointers[i] = reader.ReadUInt32();
+                    if (pointers[i] > maxPointer)
+                    {
+                        maxPointer = pointers[i];
+                    }
+                }
+
+                if (maxPointer == 0)
+                {
+                    return fileset.ChunkName * 4;
+                }
+
+                if (maxPointer >= originalResData.Length)
+                {
+                    // Pointer is out of bounds, can't determine size. Assume it's just the pointer table.
+                    return fileset.ChunkName * 4;
+                }
+
+                long endOfStringOffset = maxPointer;
+                while (endOfStringOffset < originalResData.Length && originalResData[endOfStringOffset] != 0)
+                {
+                    endOfStringOffset++;
+                }
+                endOfStringOffset++; // Include the null terminator
+
+                return (uint)(endOfStringOffset - fileset.OffsetName);
+            }
+        }
+
         public void Repack()
         {
             try
@@ -133,7 +179,7 @@ namespace SharpRES
                 // --- PASS 1: STAGE MODIFIED/PRESERVED CONTENT BLOCKS ---
                 Console.WriteLine("=== Pass 1: Staging Content Blocks ===");
                 var stagedBlocks = new Dictionary<uint, ManagedBlock>();
-                var allOriginalOffsets = new SortedSet<uint>();
+                var originalBlockMap = new Dictionary<uint, uint>(); // Map of original start offset to original length
 
                 for (int i = 0; i < _resFile.Filesets.Count; i++)
                 {
@@ -145,11 +191,14 @@ namespace SharpRES
                     if (isEnforced) fileset.AddressMode = preferredMask == SET_C_MASK ? "SET_C" : "SET_D";
                     bool isSetCSD = fileset.AddressMode == "SET_C" || fileset.AddressMode == "SET_D";
 
-                    if (isSetCSD && fileset.RealOffset > 0) allOriginalOffsets.Add(fileset.RealOffset);
-                    if (fileset.OffsetName > 0) allOriginalOffsets.Add(fileset.OffsetName);
-
+                    // Map and stage file data chunks
                     if (isSetCSD && (fileset.Size > 0 || !string.IsNullOrEmpty(jsonFileset.Filename)))
                     {
+                        if (fileset.RealOffset > 0 && !originalBlockMap.ContainsKey(fileset.RealOffset))
+                        {
+                            originalBlockMap[fileset.RealOffset] = fileset.Size;
+                        }
+
                         byte[] chunkData;
                         bool isReplaced = !string.IsNullOrEmpty(jsonFileset.Filename) && File.Exists(jsonFileset.Filename);
                         if (isReplaced)
@@ -181,8 +230,13 @@ namespace SharpRES
                         stagedBlocks[offset] = new ManagedBlock(chunkData, i, "Chunk");
                     }
 
+                    // Map and stage name blocks
                     if (fileset.OffsetName != 0 && jsonFileset.Names != null && jsonFileset.Names.Length > 0)
                     {
+                        if (!originalBlockMap.ContainsKey(fileset.OffsetName))
+                        {
+                            originalBlockMap[fileset.OffsetName] = GetOriginalNameBlockSize(i, originalResData);
+                        }
                         stagedBlocks[fileset.OffsetName] = new ManagedBlock(null, i, "Names");
                     }
                 }
@@ -193,34 +247,36 @@ namespace SharpRES
                 uint metadataEnd = (uint)(0x60 + _resFile.Filesets.Count * 32);
                 uint fileCursor = metadataEnd;
 
-                var originalOffsetsMap = allOriginalOffsets.ToDictionary(o => o, o => o);
-                var sortedOffsets = allOriginalOffsets.ToList();
-                for (int i = 0; i < sortedOffsets.Count; i++)
+                var sortedOffsets = originalBlockMap.Keys.ToList();
+                sortedOffsets.Sort();
+
+                foreach (var startOffset in sortedOffsets)
                 {
-                    uint start = sortedOffsets[i];
-                    uint end = (i + 1 < sortedOffsets.Count) ? sortedOffsets[i + 1] : (uint)originalResData.Length;
-                    if (start < fileCursor) continue;
+                    if (startOffset < fileCursor) continue; // Skip overlapping blocks if any
 
-                    if (start > fileCursor)
+                    // Add unmanaged data that exists between the previous block and this one.
+                    if (startOffset > fileCursor)
                     {
-                        finalLayout.Add(new UnmanagedBlock(originalResData.Skip((int)fileCursor).Take((int)(start - fileCursor)).ToArray()));
+                        finalLayout.Add(new UnmanagedBlock(originalResData.Skip((int)fileCursor).Take((int)(startOffset - fileCursor)).ToArray()));
                     }
 
-                    if (stagedBlocks.ContainsKey(start))
+                    // Add the managed block itself (which is always in stagedBlocks).
+                    if (stagedBlocks.ContainsKey(startOffset))
                     {
-                        finalLayout.Add(stagedBlocks[start]);
+                        finalLayout.Add(stagedBlocks[startOffset]);
                     }
-                    else
-                    {
-                        finalLayout.Add(new UnmanagedBlock(originalResData.Skip((int)start).Take((int)(end - start)).ToArray()));
-                    }
-                    fileCursor = end;
+
+                    // Advance the cursor past the space occupied by the *original* block.
+                    fileCursor = startOffset + originalBlockMap[startOffset];
                 }
+
+                // Add any remaining unmanaged data from the end of the last known block to the end of the file.
                 if (fileCursor < originalResData.Length)
                 {
                     finalLayout.Add(new UnmanagedBlock(originalResData.Skip((int)fileCursor).ToArray()));
                 }
-                // Add enforced blocks at the end
+
+                // Add enforced blocks at the very end of the file layout.
                 foreach (var enforcedBlock in stagedBlocks.Where(b => b.Key == 0))
                 {
                     finalLayout.Add(enforcedBlock.Value);
@@ -240,7 +296,13 @@ namespace SharpRES
 
                     foreach (var block in finalLayout)
                     {
-                        currentWriteHead = Align16(currentWriteHead);
+                        // CRITICAL FIX: Only align the write head for ManagedBlocks.
+                        // UnmanagedBlocks are raw data slices and must be written without alignment.
+                        if (block is ManagedBlock)
+                        {
+                            currentWriteHead = Align16(currentWriteHead);
+                        }
+
                         outputStream.Seek(currentWriteHead, SeekOrigin.Begin);
                         byte[] data = block.GetData(this);
 
@@ -255,7 +317,7 @@ namespace SharpRES
                             {
                                 newNameOffsets[managed.FilesetIndex] = currentWriteHead;
                                 Console.WriteLine($"  Fileset {managed.FilesetIndex + 1} [Names]: Wrote {data.Length} bytes at 0x{currentWriteHead:X8}");
-                                
+
                                 newConfigsValue = Math.Max(newConfigsValue, currentWriteHead + (uint)data.Length);
                             }
                         }
