@@ -81,7 +81,6 @@ namespace SharpRES
 
             public override byte[] GetData(PackRES context)
             {
-
                 if (BlockType == "Names" && _data == null)
                 {
                     var names = context._jsonData.Filesets[FilesetIndex].Names;
@@ -119,6 +118,7 @@ namespace SharpRES
 
         private uint Align16(uint offset)
         {
+  
             return (offset + 15) & ~15u;
         }
 
@@ -254,10 +254,15 @@ namespace SharpRES
                 {
                     if (startOffset < fileCursor) continue; // Skip overlapping blocks if any
 
-                    // Add unmanaged data that exists between the previous block and this one.
+                    // Add unmanaged data that exists between the previous block and this one, but only if not all zeros
                     if (startOffset > fileCursor)
                     {
-                        finalLayout.Add(new UnmanagedBlock(originalResData.Skip((int)fileCursor).Take((int)(startOffset - fileCursor)).ToArray()));
+                        byte[] gapData = originalResData.Skip((int)fileCursor).Take((int)(startOffset - fileCursor)).ToArray();
+                        if (!gapData.All(b => b == 0))
+                        {
+                            finalLayout.Add(new UnmanagedBlock(gapData));
+                        }
+                        // else skip; minimal padding will be added dynamically via alignment if needed for the next managed block
                     }
 
                     // Add the managed block itself (which is always in stagedBlocks).
@@ -270,10 +275,15 @@ namespace SharpRES
                     fileCursor = startOffset + originalBlockMap[startOffset];
                 }
 
-                // Add any remaining unmanaged data from the end of the last known block to the end of the file.
+                // Add any remaining unmanaged data from the end of the last known block to the end of the file, but only if not all zeros
                 if (fileCursor < originalResData.Length)
                 {
-                    finalLayout.Add(new UnmanagedBlock(originalResData.Skip((int)fileCursor).ToArray()));
+                    byte[] trailingData = originalResData.Skip((int)fileCursor).ToArray();
+                    if (!trailingData.All(b => b == 0))
+                    {
+                        finalLayout.Add(new UnmanagedBlock(trailingData));
+                    }
+                    // else skip; no excessive trailing padding will be added
                 }
 
                 // Add enforced blocks at the very end of the file layout.
@@ -296,8 +306,7 @@ namespace SharpRES
 
                     foreach (var block in finalLayout)
                     {
-                        // CRITICAL FIX: Only align the write head for ManagedBlocks.
-                        // UnmanagedBlocks are raw data slices and must be written without alignment.
+                        // Align managed blocks to ensure correct padding
                         if (block is ManagedBlock)
                         {
                             currentWriteHead = Align16(currentWriteHead);
@@ -323,6 +332,17 @@ namespace SharpRES
                         }
                         writer.Write(data);
                         currentWriteHead = (uint)outputStream.Position;
+                    }
+
+                    // Ensure final padding to the next 16-byte boundary
+                    uint finalSize = (uint)outputStream.Length;
+                    uint paddingNeeded = Align16(finalSize) - finalSize;
+                    if (paddingNeeded > 0 && paddingNeeded <= 15)
+                    {
+                        byte[] padding = new byte[paddingNeeded];
+                        writer.Write(padding);
+                        currentWriteHead = (uint)outputStream.Position;
+                       // Console.WriteLine($"Added {paddingNeeded} bytes of padding at 0x{finalSize:X8} to align file to 16-byte boundary.");
                     }
 
                     // The Configs value is the aligned offset of the end of the last name block.
