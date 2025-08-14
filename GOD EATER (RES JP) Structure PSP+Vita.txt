@@ -1,3 +1,5 @@
+# This supports both PSP and Vita
+
 RES Structure Information
 
 
