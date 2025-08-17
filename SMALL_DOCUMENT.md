@@ -15,6 +15,9 @@
 
 #### 3. Class `PackRES.cs` *(Repacking `-r`)*
 - `PackRES` handles the repacking. this restructures the fileset information, handles proper alignment, and compresses the files required to their respective types. This will resize the original RES file input into a big or small size depending on the edits that user do.
+- This will realign and reassign naming structure, and restore some unused chunks that are not within JSON parameters during repack...
+- Enforcement *(`-E`)* is only used for debugging, to store some external sources chunks into the RES file. not recommend to use it on RES file with very excessive external sources (eg: package populated RES files).
+
 
 ## Others
 #### 1. `Inflate.cs`
