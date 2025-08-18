@@ -85,7 +85,7 @@ public static class Compression
             deflater.SetInput(inputData);
             deflater.Finish();
 
-            byte[] buffer = new byte[1024];
+            byte[] buffer = new byte[4096]; // 1024 -M 4096. buffer changes. nothing more
             while (!deflater.IsFinished)
             {
                 int count = deflater.Deflate(buffer);
