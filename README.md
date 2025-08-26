@@ -10,7 +10,7 @@ Compatible with:
 - GOD EATER 2 RAGE BURST (PCSG00532)
 - GOD EATER RESURRECTION (PCSG00719)
 - GOD EATER OFFSHOT (PCSG00720 ~ PCSG00725)
-
+Note: Localization release are not prioritized for the time being.
 
 
 Credits:
@@ -19,14 +19,15 @@ HaoJun/Randerion: BLZ4 Codes and other structure references
 
 
 
-## Functions
-- put a RES file in the same directory as the executable
+## Program's arguments (Functions)
+Note: Put a RES file within the same directory as the executable
 - use `-x` for extraction
 - use `-r` for repacking
 - use `-E` for enforcement (rarely works, used for debugging. converts fileset RDP offsets to SET_C or SET_D masking based on population)
 
 
-# Demonstration (used Bullet.res for sampling)
+
+# Demonstration Images (used Bullet.res for sampling)
 ### Original
 <img width="1095" height="737" alt="image" src="https://github.com/user-attachments/assets/361af702-b138-48fc-bfbf-35648014fff5" />
 
@@ -37,4 +38,6 @@ HaoJun/Randerion: BLZ4 Codes and other structure references
 <img width="960" height="544" alt="2025-08-10-093256-750782" src="https://github.com/user-attachments/assets/9cf1946a-3821-4fce-b2cb-fe8ea3b60c5f" />
 
 
-
+#### Documentation about the RES File
+- Not accurate but the TXT file should give you proper context about it
+[TXT Documentation](https://github.com/nachotacos69/Sharp_EATER/blob/main/GOD%20EATER%20(RES%20JP)%20Structure%20PSP%2BVita.txt)
