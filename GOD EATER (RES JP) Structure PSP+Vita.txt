@@ -15,7 +15,7 @@ DLC Info 1 (int32): a offset for specific RES file need to seek (ex: god_menu.re
 DLC Info 2 (int32): size of that specific RES file that's being seeked and use its data
 Padding (int32): 4 bytes
 --FIXED HEADER SIZE = 32 bytes
-Note: DLC Info is not available in base game.
+Note: DLC Info is not available in base game (use this structure when tackling some patch/dlc contents)
 
 
 
@@ -23,7 +23,7 @@ Note: DLC Info is not available in base game.
 DataSet Offset (int32): offset of where the FileSet is located.
 DataSet Count (int32): how many sets/files within that FileSet.
 --FIXED DataSet Size = 64 bytes (4 + 4 = 8 bytes * 8 groups counts = 64 bytes)
-Note: 1 group = 8 bytes. the game uses 8 groups in total.
+Note: 1 group = 8 bytes. the game uses 8 groups in total as base but we will let the group count decide the proper results.
 
 
 
