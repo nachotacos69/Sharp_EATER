@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -86,7 +86,7 @@ namespace SharpRES
                 Console.WriteLine($"  Real Offset: 0x{fileset.RealOffset:X8}");
                 Console.WriteLine($"  Size: {fileset.Size} bytes");
                 Console.WriteLine($"  Unpack Size: {fileset.UnpackSize} bytes");
-                Console.WriteLine($"  Offset Name: 0x{fileset.OffsetName:X8}");
+                Console.WriteLine($"  Offset Name: 0x{_resFile.Filesets[i].OffsetName:X8}");
                 Console.WriteLine($"  Chunk Name Index: {fileset.ChunkName}");
 
                 // Print names
@@ -105,20 +105,6 @@ namespace SharpRES
 
             // Perform extraction and dictionary aggregation
             ExtractFiles();
-
-            // Serialize RES file to JSON for standalone extraction
-            if (_packageDict == null && _dataDict == null && _patchDict == null)
-            {
-                string jsonOutput = _resFile.Serialize();
-                var outputDir = Path.GetDirectoryName(_inputResFile);
-                string outputJsonFile = string.IsNullOrEmpty(outputDir)
-                    ? Path.GetFileNameWithoutExtension(_inputResFile) + ".json"
-                    : Path.Combine(outputDir, Path.GetFileNameWithoutExtension(_inputResFile) + ".json");
-                if (!string.IsNullOrEmpty(Path.GetDirectoryName(outputJsonFile)))
-                    Directory.CreateDirectory(Path.GetDirectoryName(outputJsonFile)); // Ensure directory exists
-                File.WriteAllText(outputJsonFile, jsonOutput);
-                Console.WriteLine($"Serialization complete. Output saved to {outputJsonFile}");
-            }
         }
 
         private void ExtractFiles()
@@ -130,6 +116,8 @@ namespace SharpRES
             var packageDict = _packageDict ?? new Dictionary<uint, List<string>>();
             var dataDict = _dataDict ?? new Dictionary<uint, List<string>>();
             var patchDict = _patchDict ?? new Dictionary<uint, List<string>>();
+            // List to hold paths of nested RES files for subsequent extraction
+            List<string> resFiles = new List<string>();
 
             for (int i = 0; i < _resFile.Filesets.Count; i++)
             {
@@ -280,6 +268,10 @@ namespace SharpRES
                             Console.WriteLine($"Fileset {i + 1}: Extracted {chunk.Length} bytes (raw) to {outputPath}");
                     }
 
+                    // Track .res files for nested extraction
+                    if (Path.GetExtension(outputPath).ToLower() == ".res")
+                        resFiles.Add(outputPath);
+
                     // Mark file as created
                     existingFiles.Add(outputPath);
                 }
@@ -292,12 +284,79 @@ namespace SharpRES
                 }
             }
 
-            // Serialize dictionaries for standalone RES extraction
+            // Perform nested .res extraction, passing dictionaries for aggregation
+            ExtractNestedResFiles(resFiles, packageDict, dataDict, patchDict);
+
+            // Serialize dictionaries for standalone RES extraction after all files (including nested) are processed
             if (_packageDict == null && _dataDict == null && _patchDict == null)
             {
                 SerializeRDPDictionaries(packageDict, "packageDict.json");
                 SerializeRDPDictionaries(dataDict, "dataDict.json");
                 SerializeRDPDictionaries(patchDict, "patchDict.json");
+            }
+        }
+
+        private void ExtractNestedResFiles(List<string> resFiles, Dictionary<uint, List<string>> packageDict, Dictionary<uint, List<string>> dataDict, Dictionary<uint, List<string>> patchDict)
+        {
+            if (resFiles.Count == 0) return;
+
+            Console.WriteLine($"\n=== Extracting {resFiles.Count} Nested RES Files ===");
+
+            // Track RES files for RESList.json
+            var resList = new List<object>();
+
+            for (int i = 0; i < resFiles.Count; i++)
+            {
+                string resFilePath = resFiles[i];
+                Console.WriteLine($"\n--- Processing nested RES file {i + 1}: {resFilePath} ---");
+
+                try
+                {
+                    RES_PSP resFile;
+                    using (BinaryReader reader = new BinaryReader(File.Open(resFilePath, FileMode.Open)))
+                    {
+                        resFile = new RES_PSP(reader);
+                    }
+
+                    string resOutputFolder = Path.Combine(Path.GetDirectoryName(resFilePath), Path.GetFileNameWithoutExtension(resFilePath));
+                    RESData resData = new RESData(resFile, _PackageRDP, _DataRDP, _PatchRDP, resFilePath, resOutputFolder, packageDict, dataDict, patchDict);
+                    resData.PrintInformation();
+
+                    // Serialize nested RES file to JSON in its parent's output folder
+                    string outputJsonFile = Path.ChangeExtension(resFilePath, ".json");
+                    string jsonOutput = resFile.Serialize();
+                    File.WriteAllText(outputJsonFile, jsonOutput);
+                    Console.WriteLine($"Nested RES serialization complete. Output saved to {outputJsonFile}");
+
+                    // Add to RESList
+                    resList.Add(new
+                    {
+                        Index = i + 1,
+                        ResFilePath = resFilePath,
+                        JsonFilePath = outputJsonFile
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to process nested RES file {resFilePath}: {ex.Message}");
+                }
+            }
+
+            // Serialize RESList.json
+            if (resList.Count > 0)
+            {
+                var outputDir = Path.GetDirectoryName(_inputResFile);
+                var resListPath = string.IsNullOrEmpty(outputDir) ? "RESList.json" : Path.Combine(outputDir, "RESList.json");
+                var options = new JsonSerializerOptions
+                {
+                    WriteIndented = true,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                };
+                string jsonOutput = JsonSerializer.Serialize(resList, options);
+                if (!string.IsNullOrEmpty(Path.GetDirectoryName(resListPath)))
+                    Directory.CreateDirectory(Path.GetDirectoryName(resListPath));
+                File.WriteAllText(resListPath, jsonOutput);
+                Console.WriteLine($"\nRESList saved to {resListPath}");
             }
         }
 
@@ -328,7 +387,7 @@ namespace SharpRES
 
             string jsonOutput = JsonSerializer.Serialize(serializedData, options);
             if (!string.IsNullOrEmpty(Path.GetDirectoryName(outputPath)))
-                Directory.CreateDirectory(Path.GetDirectoryName(outputPath)); 
+                Directory.CreateDirectory(Path.GetDirectoryName(outputPath));
             File.WriteAllText(outputPath, jsonOutput);
             Console.WriteLine($"RDP dictionary saved to {outputPath}");
         }

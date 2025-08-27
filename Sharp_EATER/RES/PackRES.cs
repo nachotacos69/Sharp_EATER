@@ -129,9 +129,9 @@ namespace SharpRES
         {
             try
             {
-                Load();
+                byte[] originalResData = PrepareOriginalData();
+                Load(originalResData);
                 uint preferredMask = DeterminePreferredMask();
-                byte[] originalResData = File.ReadAllBytes(_inputResFile);
 
                 // --- PASS 1: STAGE MODIFIED/PRESERVED CONTENT BLOCKS ---
                 Console.WriteLine("=== Pass 1: Staging Content Blocks ===");
@@ -149,7 +149,6 @@ namespace SharpRES
                     bool isSetCSD = fileset.AddressMode == "SET_C" || fileset.AddressMode == "SET_D";
 
                     // Map and stage file data chunks.
-                    // This correctly handles filesets with empty sizes (size=0) but a valid RealOffset to preserve their metadata.
                     if (isSetCSD)
                     {
                         bool isReplaced = !string.IsNullOrEmpty(jsonFileset.Filename) && File.Exists(jsonFileset.Filename);
@@ -178,12 +177,10 @@ namespace SharpRES
                                     chunkData = rawData;
                                     fileset.Size = (uint)rawData.Length;
                                     fileset.UnpackSize = (_resFile.Filesets[i].UnpackSize == 0) ? 0 : fileset.Size;
-                                    // This should fix FileSet Structure that have Size but zero UnpackSize by default.
                                 }
                             }
                             else
                             {
-                                // Preserve original data, even if size is 0.
                                 chunkData = new byte[fileset.Size];
                                 if (fileset.Size > 0)
                                 {
@@ -219,8 +216,7 @@ namespace SharpRES
                 {
                     if (startOffset < fileCursor) continue; // Skip overlapping blocks if any
 
-                    // Add unmanaged data that exists between the previous block and this one.
-                    if (startOffset > fileCursor)
+                    if (startOffset > fileCursor) // Add unmanaged data that exists between the previous block and this one.
                     {
                         byte[] gapData = originalResData.Skip((int)fileCursor).Take((int)(startOffset - fileCursor)).ToArray();
                         if (!gapData.All(b => b == 0))
@@ -229,18 +225,15 @@ namespace SharpRES
                         }
                     }
 
-                    // Add the managed block itself.
-                    if (stagedBlocks.ContainsKey(startOffset))
+                    if (stagedBlocks.ContainsKey(startOffset)) // Add the managed block itself.
                     {
                         finalLayout.Add(stagedBlocks[startOffset]);
                     }
 
-                    // Advance the cursor past the space occupied by the *original* block.
-                    fileCursor = startOffset + originalBlockMap[startOffset];
+                    fileCursor = startOffset + originalBlockMap[startOffset]; // Advance the cursor past the space occupied by the *original* block.
                 }
 
-                // Add any remaining unmanaged data from the end of the last known block to the end of the file.
-                if (fileCursor < originalResData.Length)
+                if (fileCursor < originalResData.Length) // Add any remaining unmanaged data from the end of the last known block to the end of the file.
                 {
                     byte[] trailingData = originalResData.Skip((int)fileCursor).ToArray();
                     if (!trailingData.All(b => b == 0))
@@ -249,8 +242,7 @@ namespace SharpRES
                     }
                 }
 
-                // Add enforced blocks at the very end of the file layout.
-                foreach (var enforcedBlock in stagedBlocks.Where(b => b.Key == 0))
+                foreach (var enforcedBlock in stagedBlocks.Where(b => b.Key == 0))  // Add enforced blocks at the very end of the file layout.
                 {
                     finalLayout.Add(enforcedBlock.Value);
                 }
@@ -295,8 +287,7 @@ namespace SharpRES
                         currentWriteHead = (uint)outputStream.Position;
                     }
 
-                    // Ensure final padding to the next 16-byte boundary
-                    uint finalSize = (uint)outputStream.Length;
+                    uint finalSize = (uint)outputStream.Length; // Ensure final padding to the next 16-byte boundary
                     uint paddingNeeded = Align16(finalSize) - finalSize;
                     if (paddingNeeded > 0 && paddingNeeded <= 15)
                     {
@@ -338,17 +329,13 @@ namespace SharpRES
                             fileset.RawOffset = (newChunkOffset == 0) ? 0 : (mask | (newChunkOffset & 0x00FFFFFF));
                         }
 
-                        // **FIX**: Removed the incorrect logic that zeroed out offsets for empty files.
-                        // The original RawOffset is now preserved by default unless a new one is calculated above.
-
                         writer.Write(fileset.RawOffset); writer.Write(fileset.Size); writer.Write(fileset.OffsetName); writer.Write(fileset.ChunkName); writer.Write(new byte[12]); writer.Write(fileset.UnpackSize);
                     }
                     Console.WriteLine("Metadata and Fileset entries updated.");
 
                     // --- FINALIZE ---
-                    string outputResFile = Path.Combine(Path.GetDirectoryName(_inputResFile) ?? string.Empty, Path.GetFileNameWithoutExtension(_inputResFile) + (_enforcedInput ? "_enforced.res" : "_repacked.res"));
-                    File.WriteAllBytes(outputResFile, outputStream.ToArray());
-                    Console.WriteLine($"\nRepacking complete. Output saved to {outputResFile}");
+                    File.WriteAllBytes(_inputResFile, outputStream.ToArray());
+                    Console.WriteLine($"\nRepacking complete. Output saved to {_inputResFile}");
                 }
             }
             catch (Exception ex)
@@ -362,13 +349,39 @@ namespace SharpRES
 
         #region File Loading and Validation
 
-        private void Load()
+        private byte[] PrepareOriginalData()
         {
-            if (!File.Exists(_inputResFile)) throw new FileNotFoundException($"Input .res file not found: {_inputResFile}");
+            string backupFile = _inputResFile + ".bak";
+
+            if (File.Exists(backupFile))
+            {
+                Console.WriteLine($"Backup found: {backupFile}. Using it as the original source for repacking.");
+                return File.ReadAllBytes(backupFile);
+            }
+            else
+            {
+                if (!File.Exists(_inputResFile))
+                {
+                    throw new FileNotFoundException($"Input .res file not found and no backup exists: {_inputResFile}");
+                }
+                Console.WriteLine($"No backup found. Creating new backup: {backupFile}");
+                byte[] originalData = File.ReadAllBytes(_inputResFile);
+                File.WriteAllBytes(backupFile, originalData);
+                return originalData;
+            }
+        }
+
+        private void Load(byte[] originalResData)
+        {
             if (!File.Exists(_inputJsonFile)) throw new FileNotFoundException($"Input .json file not found: {_inputJsonFile}");
             string jsonContent = File.ReadAllText(_inputJsonFile);
             _jsonData = JsonSerializer.Deserialize<JsonData>(jsonContent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }) ?? throw new InvalidDataException("Failed to deserialize JSON file.");
-            using (BinaryReader reader = new BinaryReader(File.Open(_inputResFile, FileMode.Open))) { _resFile = new RES_PSP(reader); }
+
+            using (MemoryStream ms = new MemoryStream(originalResData))
+            using (BinaryReader reader = new BinaryReader(ms))
+            {
+                _resFile = new RES_PSP(reader);
+            }
             ValidateAndMap();
         }
 
