@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -7,17 +7,28 @@ using System.Text.Json;
 
 namespace SharpRES
 {
+    
+    public class EnforcementRule
+    {
+        public List<string> SourceModes { get; set; } = new List<string>();
+        public string TargetMode { get; set; }
+        public bool IsRdpToRes { get; set; }
+        public bool IsRdpToRdp { get; set; }
+    }
+
     public class PackRES
     {
         private readonly string _inputResFile;
         private readonly string _inputJsonFile;
-        private readonly bool _enforcedInput;
+        private readonly EnforcementRule _enforcementRule;
+        private readonly Dictionary<string, (FileStream Stream, BinaryWriter Writer, string OutputPath)> _rdpStreams;
+        private readonly Dictionary<string, long> _rdpCursors;
+
         private RES_PSP _resFile;
         private JsonData _jsonData;
         private const uint SET_C_MASK = 0xC0000000;
         private const uint SET_D_MASK = 0xD0000000;
-
-
+        private const long RDP_ALIGNMENT = 0x800;
 
         #region Nested Classes (Data Structures)
 
@@ -53,13 +64,6 @@ namespace SharpRES
             public bool? CompressedBLZ2 { get; set; }
             public bool? CompressedBLZ4 { get; set; }
             public string Filename { get; set; }
-        }
-
-        private class RDPDictionaryEntry
-        {
-            public int Index { get; set; }
-            public string[] Files { get; set; }
-            public uint RealOffset { get; set; }
         }
 
         // --- Content Block Abstractions for Repacking ---
@@ -114,11 +118,15 @@ namespace SharpRES
 
         #region Constructor
 
-        public PackRES(string inputResFile, string inputJsonFile, bool enforcedInput = false)
+        public PackRES(string inputResFile, string inputJsonFile, EnforcementRule rule,
+                       Dictionary<string, (FileStream Stream, BinaryWriter Writer, string OutputPath)> rdpStreams,
+                       Dictionary<string, long> rdpCursors)
         {
             _inputResFile = inputResFile ?? throw new ArgumentNullException(nameof(inputResFile));
             _inputJsonFile = inputJsonFile ?? throw new ArgumentNullException(nameof(inputJsonFile));
-            _enforcedInput = enforcedInput;
+            _enforcementRule = rule;
+            _rdpStreams = rdpStreams;
+            _rdpCursors = rdpCursors;
         }
 
         #endregion
@@ -143,16 +151,31 @@ namespace SharpRES
                     var fileset = _resFile.Filesets[i];
                     var jsonFileset = _jsonData.Filesets[i];
                     string originalAddressMode = fileset.AddressMode;
+                    bool isEnforced = false;
 
-                    bool isEnforced = _enforcedInput && (originalAddressMode == "Package" || originalAddressMode == "Data" || originalAddressMode == "Patch");
-                    if (isEnforced) fileset.AddressMode = preferredMask == SET_C_MASK ? "SET_C" : "SET_D";
+                    // Check for and apply enforcement rules
+                    if (_enforcementRule != null && _enforcementRule.SourceModes.Contains(originalAddressMode))
+                    {
+                        isEnforced = true;
+                        if (_enforcementRule.IsRdpToRes)
+                        {
+                            fileset.AddressMode = _enforcementRule.TargetMode == "SET_C" ? "SET_C" : "SET_D";
+                            Console.WriteLine($"  Fileset {i + 1}: Enforcing '{originalAddressMode}' to '{fileset.AddressMode}'. Data will be moved to RES file.");
+                        }
+                        else if (_enforcementRule.IsRdpToRdp)
+                        {
+                            HandleRdpToRdpEnforcement(i, fileset, jsonFileset, originalAddressMode);
+                            // Data is written to RDP, not staged for RES. Continue to process name block.
+                        }
+                    }
+
                     bool isSetCSD = fileset.AddressMode == "SET_C" || fileset.AddressMode == "SET_D";
 
-                    // Map and stage file data chunks.
+                    // Map and stage file data chunks for local RES storage (SET_C/SET_D).
                     if (isSetCSD)
                     {
                         bool isReplaced = !string.IsNullOrEmpty(jsonFileset.Filename) && File.Exists(jsonFileset.Filename);
-                        bool hasOriginalBlock = fileset.RealOffset > 0;
+                        bool hasOriginalBlock = !isEnforced && fileset.RealOffset > 0;
 
                         if (isReplaced || hasOriginalBlock)
                         {
@@ -179,7 +202,7 @@ namespace SharpRES
                                     fileset.UnpackSize = (_resFile.Filesets[i].UnpackSize == 0) ? 0 : fileset.Size;
                                 }
                             }
-                            else
+                            else // Preserving original data
                             {
                                 chunkData = new byte[fileset.Size];
                                 if (fileset.Size > 0)
@@ -192,7 +215,7 @@ namespace SharpRES
                         }
                     }
 
-                    // Map and stage name blocks
+                    // Map and stage name blocks (for all fileset types)
                     if (fileset.OffsetName != 0 && jsonFileset.Names != null && jsonFileset.Names.Length > 0)
                     {
                         if (!originalBlockMap.ContainsKey(fileset.OffsetName))
@@ -214,9 +237,9 @@ namespace SharpRES
 
                 foreach (var startOffset in sortedOffsets)
                 {
-                    if (startOffset < fileCursor) continue; // Skip overlapping blocks if any
+                    if (startOffset < fileCursor) continue;
 
-                    if (startOffset > fileCursor) // Add unmanaged data that exists between the previous block and this one.
+                    if (startOffset > fileCursor)
                     {
                         byte[] gapData = originalResData.Skip((int)fileCursor).Take((int)(startOffset - fileCursor)).ToArray();
                         if (!gapData.All(b => b == 0))
@@ -225,15 +248,15 @@ namespace SharpRES
                         }
                     }
 
-                    if (stagedBlocks.ContainsKey(startOffset)) // Add the managed block itself.
+                    if (stagedBlocks.ContainsKey(startOffset))
                     {
                         finalLayout.Add(stagedBlocks[startOffset]);
                     }
 
-                    fileCursor = startOffset + originalBlockMap[startOffset]; // Advance the cursor past the space occupied by the *original* block.
+                    fileCursor = startOffset + originalBlockMap[startOffset];
                 }
 
-                if (fileCursor < originalResData.Length) // Add any remaining unmanaged data from the end of the last known block to the end of the file.
+                if (fileCursor < originalResData.Length)
                 {
                     byte[] trailingData = originalResData.Skip((int)fileCursor).ToArray();
                     if (!trailingData.All(b => b == 0))
@@ -242,7 +265,7 @@ namespace SharpRES
                     }
                 }
 
-                foreach (var enforcedBlock in stagedBlocks.Where(b => b.Key == 0))  // Add enforced blocks at the very end of the file layout.
+                foreach (var enforcedBlock in stagedBlocks.Where(b => b.Key == 0))
                 {
                     finalLayout.Add(enforcedBlock.Value);
                 }
@@ -251,7 +274,7 @@ namespace SharpRES
                 Console.WriteLine("\n=== Pass 2: Writing Final Layout ===");
                 var newChunkOffsets = new Dictionary<int, uint>();
                 var newNameOffsets = new Dictionary<int, uint>();
-                uint newConfigsValue = metadataEnd; // Initialize with the end of the fileset table
+                uint newConfigsValue = metadataEnd;
 
                 using (var outputStream = new MemoryStream())
                 using (var writer = new BinaryWriter(outputStream))
@@ -287,7 +310,7 @@ namespace SharpRES
                         currentWriteHead = (uint)outputStream.Position;
                     }
 
-                    uint finalSize = (uint)outputStream.Length; // Ensure final padding to the next 16-byte boundary
+                    uint finalSize = (uint)outputStream.Length;
                     uint paddingNeeded = Align16(finalSize) - finalSize;
                     if (paddingNeeded > 0 && paddingNeeded <= 15)
                     {
@@ -343,6 +366,69 @@ namespace SharpRES
                 Console.WriteLine($"Error repacking files: {ex.Message}\n{ex.StackTrace}");
                 throw;
             }
+        }
+
+        #endregion
+
+        #region Enforcement Logic
+
+        private void HandleRdpToRdpEnforcement(int filesetIndex, RES_PSP.Fileset fileset, JsonFileset jsonFileset, string originalAddressMode)
+        {
+            string targetRdpName = Program.GetRdpFileNameFromMode(_enforcementRule.TargetMode);
+            if (targetRdpName == null || !_rdpStreams.ContainsKey(targetRdpName))
+            {
+                // This should be caught by Program.cs, but as a safeguard:
+                Console.WriteLine($"  Fileset {filesetIndex + 1}: [Warning] Cannot enforce to '{_enforcementRule.TargetMode}' because target RDP stream is not available. Skipping enforcement.");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(jsonFileset.Filename) || !File.Exists(jsonFileset.Filename))
+            {
+                Console.WriteLine($"  Fileset {filesetIndex + 1}: [Warning] Cannot enforce '{originalAddressMode}' because replacement file '{jsonFileset.Filename ?? "null"}' does not exist. Preserving original entry.");
+                return;
+            }
+
+            var (stream, writer, _) = _rdpStreams[targetRdpName];
+            long currentCursor = _rdpCursors[targetRdpName];
+
+            // 1. Calculate next aligned offset and required padding
+            long nextAlignedOffset = (currentCursor + (RDP_ALIGNMENT - 1)) & ~(RDP_ALIGNMENT - 1);
+            long paddingNeeded = nextAlignedOffset - currentCursor;
+
+            // 2. Read and compress file data
+            byte[] rawData = File.ReadAllBytes(jsonFileset.Filename);
+            byte[] chunkData;
+            bool isCompressed = jsonFileset.CompressedBLZ2 == true || jsonFileset.CompressedBLZ4 == true;
+            if (isCompressed)
+            {
+                fileset.UnpackSize = (uint)rawData.Length;
+                if (jsonFileset.CompressedBLZ2 == true) chunkData = Compression.LeCompression(rawData); else chunkData = BLZ4Utils.PackBLZ4Data(rawData);
+                fileset.Size = (uint)chunkData.Length;
+            }
+            else
+            {
+                chunkData = rawData;
+                fileset.Size = (uint)rawData.Length;
+                fileset.UnpackSize = (fileset.UnpackSize == 0) ? 0 : fileset.Size;
+            }
+
+            // 3. Write padding and data to RDP file
+            writer.BaseStream.Seek(currentCursor, SeekOrigin.Begin);
+            if (paddingNeeded > 0)
+            {
+                writer.Write(new byte[paddingNeeded]);
+            }
+            writer.Write(chunkData);
+
+            // 4. Update the RDP cursor for the next file
+            _rdpCursors[targetRdpName] = nextAlignedOffset + chunkData.Length;
+
+            // 5. Update the in-memory fileset with new RDP location info
+            fileset.AddressMode = _enforcementRule.TargetMode;
+            fileset.RealOffset = (uint)nextAlignedOffset;
+            fileset.RawOffset = Program.GetRawOffsetFromRealOffset(fileset.RealOffset, fileset.AddressMode);
+
+            Console.WriteLine($"  Fileset {filesetIndex + 1}: Enforced '{originalAddressMode}' to '{fileset.AddressMode}'. Wrote {chunkData.Length} bytes to {targetRdpName} at 0x{fileset.RealOffset:X8} (New RawOffset: 0x{fileset.RawOffset:X8})");
         }
 
         #endregion
@@ -468,53 +554,6 @@ namespace SharpRES
             int setCCount = _jsonData.Filesets.Count(f => f.AddressMode == "SET_C");
             int setDCount = _jsonData.Filesets.Count(f => f.AddressMode == "SET_D");
             return setCCount >= setDCount ? SET_C_MASK : SET_D_MASK;
-        }
-
-        #endregion
-
-        #region RDP Helpers
-
-        private Dictionary<string, List<RDPDictionaryEntry>> LoadRDPDictionaries()
-        {
-            var dictionaries = new Dictionary<string, List<RDPDictionaryEntry>>();
-            string[] rdpFiles = { "packageDict.json", "dataDict.json", "patchDict.json" };
-            string[] rdpNames = { "package.rdp", "data.rdp", "patch.rdp" };
-            for (int i = 0; i < rdpFiles.Length; i++)
-            {
-                string jsonPath = rdpFiles[i]; string rdpName = rdpNames[i];
-                if (!File.Exists(jsonPath)) { Console.WriteLine($"Dictionary {jsonPath} not found, skipping {rdpName}."); continue; }
-                try
-                {
-                    string jsonContent = File.ReadAllText(jsonPath);
-                    var entries = JsonSerializer.Deserialize<List<RDPDictionaryEntry>>(jsonContent, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-                    if (entries == null || entries.Count == 0) { Console.WriteLine($"Dictionary {jsonPath} is empty, skipping {rdpName}."); continue; }
-                    dictionaries[rdpName] = entries.OrderBy(e => e.Index).ToList();
-                    Console.WriteLine($"Loaded dictionary {jsonPath} with {entries.Count} entries for {rdpName}.");
-                }
-                catch (Exception ex) { Console.WriteLine($"Failed to load dictionary {jsonPath}: {ex.Message}, skipping {rdpName}."); }
-            }
-            return dictionaries;
-        }
-
-        private Dictionary<string, (FileStream Stream, BinaryWriter Writer, string OutputPath)> PrepareRDPStreams()
-        {
-            var streams = new Dictionary<string, (FileStream, BinaryWriter, string)>();
-            string[] rdpFiles = { "package.rdp", "data.rdp", "patch.rdp" };
-            foreach (var rdpFile in rdpFiles)
-            {
-                if (!File.Exists(rdpFile)) { Console.WriteLine($"RDP file {rdpFile} not found, skipping."); continue; }
-                string outputRdpFile = Path.Combine(Path.GetDirectoryName(rdpFile) ?? string.Empty, Path.GetFileNameWithoutExtension(rdpFile) + "_new.rdp");
-                try
-                {
-                    File.Copy(rdpFile, outputRdpFile, true);
-                    var stream = new FileStream(outputRdpFile, FileMode.Open, FileAccess.ReadWrite);
-                    var writer = new BinaryWriter(stream);
-                    streams[rdpFile] = (stream, writer, outputRdpFile);
-                    Console.WriteLine($"Prepared RDP stream for {outputRdpFile}");
-                }
-                catch (Exception ex) { Console.WriteLine($"Failed to prepare RDP stream for {outputRdpFile}: {ex.Message}, skipping."); }
-            }
-            return streams;
         }
 
         #endregion
