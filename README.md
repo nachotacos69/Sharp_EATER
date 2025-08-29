@@ -10,6 +10,12 @@ Compatible with:
 - GOD EATER 2 RAGE BURST (PCSG00532)
 - GOD EATER RESURRECTION (PCSG00719)
 - GOD EATER OFFSHOT (PCSG00720 ~ PCSG00725)
+
+Files Required:
+- package.rdp
+- data.rdp (not present on RAGE BURST, RESURRECTION, OFFSHOT)
+- patch.rdp (DLC CONTENT, NOT PRESENT on OFFSHOT)
+- system.res (or any RES file).
 Note: Localization release are not prioritized for the time being.
 
 
@@ -23,7 +29,8 @@ HaoJun/Randerion: BLZ4 Codes and other structure references
 Note: Put a RES file within the same directory as the executable
 - use `-x` for extraction
 - use `-r` for repacking
-- use `-E` for enforcement (rarely works, used for debugging. converts fileset RDP offsets to SET_C or SET_D masking based on population)
+- use `-E` for enforcement (used for debugging). 
+- Enforcement is used to swap extrernal source's fileset RDP offsets to SET_C or SET_D masking based on population. or swap with one external source to another..
 
 
 
@@ -41,3 +48,4 @@ Note: Put a RES file within the same directory as the executable
 #### Documentation about the RES File
 - Not accurate but the TXT file should give you proper context about it
 [TXT Documentation](https://github.com/nachotacos69/Sharp_EATER/blob/main/GOD%20EATER%20(RES%20JP)%20Structure%20PSP%2BVita.txt)
+
