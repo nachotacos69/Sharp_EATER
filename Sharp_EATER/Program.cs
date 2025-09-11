@@ -382,7 +382,7 @@ namespace SharpRES
             Console.WriteLine("Enforcement Rule (-E) Details:");
             Console.WriteLine("  The -E flag modifies where file data is stored during repack.");
             Console.WriteLine("  Format: 'SourceMode(s)=TargetMode'");
-            Console.WriteLine("  Modes can be names (Package, Data, Patch, SET_C) or hex (0x40, 0x50, etc.).\n");
+            Console.WriteLine("  Modes can be names (Package, Data, Patch, SET_C, SET_D) or hex (0x40, 0x50, 0x60, 0xC0, 0xD0.).\n");
             Console.WriteLine("  Example 1 (Embed in RES): Sharp_EATER.exe -r file.res file.json -E Package,Data=SET_C");
             Console.WriteLine("    --> Moves files from package.rdp and data.rdp into file.res.\n");
             Console.WriteLine("  Example 2 (Move to RDP): Sharp_EATER.exe -r file.res file.json -E Package=Patch");

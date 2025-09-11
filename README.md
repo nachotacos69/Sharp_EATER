@@ -1,36 +1,42 @@
 # SharpRES
 Created by: Yamato Nagasaki
 
-- A **CONCEPT** tool used for basic unpacking and repacking
+- A **CONCEPT** tool used for basic unpacking and repacking.
 - It only supports single RES file though, not overall a batch/full unpacking and repacking
-- This only supports base game only, DLC will not be supported.
+- This only supports base game only, DLC will not be supported. but information is provided in documenation
 
-Compatible with:
+
+### Compatible with JP versions of the game:
 - GOD EATER 2 PSP/Vita (NPJH50832 / PCSG00240)
 - GOD EATER 2 RAGE BURST (PCSG00532)
 - GOD EATER RESURRECTION (PCSG00719)
 - GOD EATER OFFSHOT (PCSG00720 ~ PCSG00725)
 
-Files Required:
+### Files Required:
 - package.rdp
-- data.rdp (not present on RAGE BURST, RESURRECTION, OFFSHOT)
+- data.rdp (NOT PRESENT on RAGE BURST, RESURRECTION, OFFSHOT)
 - patch.rdp (DLC CONTENT, NOT PRESENT on OFFSHOT)
 - system.res (or any RES file).
-Note: Localization release are not prioritized for the time being.
 
 
-Credits:
-HaoJun/Randerion: BLZ4 Codes and other structure references
-- https://github.com/HaoJun0823/
+## Localization releases and PC versions are not prioritized for the time being due to multiple languages
+- PC, PS4, PSVita Localization has 6 languages (or 3 in some depends on game region)
+- English, French, Italian, Deutsch, Espanol, Russian. So i can't work on these ones very well.
+- For PC Version, check GECV.
+
+
+## Credits:
+HaoJun/Randerion's GECV: BLZ4 Codes and other structure references
+- https://github.com/HaoJun0823/GECV-OLD/
 
 
 
-## Program's arguments (Functions)
+### Program's arguments (Functions)
 Note: Put a RES file within the same directory as the executable
 - use `-x` for extraction
 - use `-r` for repacking
 - use `-E` for enforcement (used for debugging). 
-- Enforcement is used to swap extrernal source's fileset RDP offsets to SET_C or SET_D masking based on population. or swap with one external source to another..
+- Enforcement is used to swap extrernal source's fileset RDP offsets to SET_C or SET_D masking based on population. or swap with one external source to another.. 
 
 
 

@@ -10,13 +10,12 @@ Group Offset (int32): pointer for the dataset.
 Group Count (int8): total count of the groups.
 Unknown (int32): not sure about this data here.
 Padding (int24): 3 bytes.
-Config (int32): overall size of the information (header to last name structure)
+Config (int32): overall size of the information [header to the name structures] (before chunks of data)
 DLC Info 1 (int32): a offset for specific RES file need to seek (ex: god_menu.res [patch] needs to seek god_menu.res [original]) 
 DLC Info 2 (int32): size of that specific RES file that's being seeked and use its data
 Padding (int32): 4 bytes
 --FIXED HEADER SIZE = 32 bytes
-Note: DLC Info is not available in base game (use this structure when tackling some patch/dlc contents)
-
+Note: check DLC Info on the end of the docs.
 
 
 ====DataSet Information
@@ -49,10 +48,10 @@ Unpack Size (int32): true/raw size of that data when decompressed. (if not compr
 - for Reserve. these stuff usually are empty files, some are valid but placed in `bin` folders. usually contain `self` modules.
 - for DataSets. they exist as folders (data_[value]). only to interact with their `size` value if you changed something with a specific file.
 - for SET_C and SET_D. their data is located within the current RES file you are reading or checking out.
-example: 0xC0001234 -> remove (0x`XX`) -> 0x00001234. the Real Offset of a SET_C is 0x00001234.
+// Example: 0xC0001234 -> remove (0x`XX`) -> 0x00001234. the Real Offset of a SET_C is 0x00001234.
 - for Package, Data, Patch uses different external sources.
 - Converting these Raw Offset requires multiplication of offsets by 0x800.
-example:
+// Example:
 - if FileSet has Package Address Mode => Raw Offset -> 0x40109BFE -> remove (0x`XX`) -> 0x00109BFE * 0x800 = 0x84DFF000.
 - the Real Offset of a Package is 0x84DFF000.
 
@@ -62,9 +61,20 @@ example:
 Pointers (int32): these pointers leads to the fileset's actual file name.
 -- Name Pointers Size = vary, but max size is 20 bytes (4 + 4 + 4 + 4)
 Note: use Chunk Name to control the pointers you need to read.
-example:
+// Example:
 - if Offset Name is 0x2000, and has 3 Chunk Name value. check 0x2000, read each pointers by 4 bytes each.
 - since chunk name value equivalents to 4 bytes. so 4 bytes * 3 = 12 bytes, cut 12 bytes by 4, you get 3 pointers
 
 
 
+====DLC Info
+- the DLC Section usually seeks the original SET_C or SET_D types of data on that specific file.
+- does not apply on RDP related Address Modes.
+- tinker around to find the right recipe
+
+// Example:
+- if DLC RES file's SET_C seeks "MS_010N_calig.res", and the size does not match with the original counterpart being checked.
+  because you modified the original data and the size range changed. the game does not load that, and DLC pop up error will occur.
+- To counter this, you need to update the original data size to match in DLC's SET_C.
+- Or put the new modified data on the EOF of either on "Data, Package, or Patch" RDP files, divide the offset by 800 => [offset / 0x800]
+  then use the divided offset to update the SET_C raw offset to the Patch Address Mode offset. (0xC01000 to 0x608000)
