@@ -52,6 +52,8 @@ Note: Put a RES file within the same directory as the executable
 
 
 #### Documentation about the RES File
-- Not accurate but the TXT file should give you proper context about it
-[TXT Documentation](https://github.com/nachotacos69/Sharp_EATER/blob/main/GOD%20EATER%20(RES%20JP)%20Structure%20PSP%2BVita.txt)
-[Classes](https://github.com/nachotacos69/Sharp_EATER/blob/main/Classes.md)
+- Some informations. Not accurate but the documentations should give you proper context about these stuff
+
+1. [RES TXT Documentation](https://github.com/nachotacos69/Sharp_EATER/blob/main/GOD%20EATER%20(RES%20JP)%20Structure%20PSP%2BVita.txt)
+
+2. [Classes](https://github.com/nachotacos69/Sharp_EATER/blob/main/Classes.md)
