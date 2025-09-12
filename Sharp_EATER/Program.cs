@@ -368,7 +368,7 @@ namespace SharpRES
 
         private static void PrintUsage()
         {
-            Console.WriteLine("Sharp Eater by Yamato Nagasaki [Experimental Release v1.4]\n- A GOD EATER Tool. Used for RES Unpacking/Repacking\n");
+            Console.WriteLine("Sharp Eater by Yamato Nagasaki [Experimental Release v1.45]\n- A GOD EATER Tool. Used for RES Unpacking/Repacking\n");
             Console.WriteLine("Usage for Unpacking: Sharp_EATER.exe -x [input.res|input.rtbl]");
             Console.WriteLine("--> Generates dictionaries and a JSON file counterpart of the input file.\n");
             PrintRepackUsage();

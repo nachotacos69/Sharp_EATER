@@ -148,7 +148,7 @@ namespace SharpRES
                      * "DataSet" -> Defines some files that are within `data_` prefixes folders (this is a replacement for data.rdp)
                      * "Package" -> Package File contains heavy data of the game (audio, cutscene and mission datas, character and enemy textures, and other things)
                      * "Data" -> Data File contains medium data of the game (usually just textures for other characters/players, some audios, some enemy data, and other things)
-                     * "Patch" -> Patch File contains extra contents of the game (DLC)
+                     * "Patch" -> Patch File contains extra contents of the game (DLC). Or any updated files from the base game is loaded in the DLC.
                      * "SET_C" or "SET_D" -> These two are usually sets of data that are local and can be found within a RES file (different per RES file)
                      */
             }
