@@ -33,7 +33,7 @@ namespace SharpRES
             _packageDict = packageDict;
             _dataDict = dataDict;
             _patchDict = patchDict;
-            _singleFileMode = singleFileMode;
+            _singleFileMode = singleFileMode; // for "-single" args.
         }
 
         public void PrintInformation()
@@ -294,7 +294,7 @@ namespace SharpRES
             }
             else if (resFiles.Count > 0)
             {
-                Console.WriteLine($"\nSkipping extraction of {resFiles.Count} nested RES file(s). -single args applied on this session.");
+                Console.WriteLine($"\nSkipping {resFiles.Count} nested RES file(s). '-single' args applied on this session.");
             }
 
             // Serialize dictionaries for standalone RES extraction after all files (including nested) are processed

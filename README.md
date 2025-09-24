@@ -21,7 +21,8 @@ Created by: Yamato Nagasaki
 
 ## Localization releases and PC versions are not prioritized for the time being due to multiple languages
 - PC, PS4, PSVita Localization has 6 languages (or 3 in some depends on game region)
-- English, French, Italian, Deutsch, Espanol, Russian. So i can't work on these ones very well.
+- **English, French, Italian, Deutsch, Espanol, Russian**.
+- So i can't work on these ones very well, this will result to a more large storage usage.
 - For PC Version, check GECV.
 
 
@@ -35,11 +36,11 @@ HaoJun/Randerion's GECV: BLZ4 Codes and other structure references
 Note: Put a RES file within the same directory as the executable
 1. Unpacking
 - use `-x` for extraction.
-- for single RES file extraction. use `-single` (in case if RES file has nested RES files and only want to interact one file.)
+- for single RES file extraction. use `-single`, useful to avoid nested RES files for extraction if you only want to modify something from that current RES file.
 
-2. Repack
+2. Repack (not stable, still in experimental)
 - use `-r` for repacking.
-- for Repack with Nested. use `-n`
+- for Repacking with Nested RES File Contents. use `-n`
 - use `-E` for enforcement (used for debugging). 
 - Enforcement is used to swap extrernal source's fileset RDP offsets to SET_C or SET_D masking based on population. or swap with one external source to another.. 
 
