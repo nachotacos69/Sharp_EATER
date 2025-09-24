@@ -1,4 +1,4 @@
-﻿﻿using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -17,10 +17,12 @@ namespace SharpRES
         private readonly Dictionary<uint, List<string>> _packageDict;
         private readonly Dictionary<uint, List<string>> _dataDict;
         private readonly Dictionary<uint, List<string>> _patchDict;
+        private readonly bool _singleFileMode;
 
         public RESData(RES_PSP resFile, bool PackageRDP, bool DataRDP, bool PatchRDP, string inputResFile,
             string outputFolder = null, Dictionary<uint, List<string>> packageDict = null,
-            Dictionary<uint, List<string>> dataDict = null, Dictionary<uint, List<string>> patchDict = null)
+            Dictionary<uint, List<string>> dataDict = null, Dictionary<uint, List<string>> patchDict = null,
+            bool singleFileMode = false)
         {
             _resFile = resFile;
             _PackageRDP = PackageRDP;
@@ -31,6 +33,7 @@ namespace SharpRES
             _packageDict = packageDict;
             _dataDict = dataDict;
             _patchDict = patchDict;
+            _singleFileMode = singleFileMode;
         }
 
         public void PrintInformation()
@@ -285,7 +288,14 @@ namespace SharpRES
             }
 
             // Perform nested .res extraction, passing dictionaries for aggregation
-            ExtractNestedResFiles(resFiles, packageDict, dataDict, patchDict);
+            if (!_singleFileMode)
+            {
+                ExtractNestedResFiles(resFiles, packageDict, dataDict, patchDict);
+            }
+            else if (resFiles.Count > 0)
+            {
+                Console.WriteLine($"\nSkipping extraction of {resFiles.Count} nested RES file(s). -single args applied on this session.");
+            }
 
             // Serialize dictionaries for standalone RES extraction after all files (including nested) are processed
             if (_packageDict == null && _dataDict == null && _patchDict == null)

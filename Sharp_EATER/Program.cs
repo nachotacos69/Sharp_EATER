@@ -31,7 +31,7 @@ namespace SharpRES
             {
                 if (mode == "-x")
                 {
-                    HandleUnpack(inputFile);
+                    HandleUnpack(inputFile, args);
                 }
                 else if (mode == "-r")
                 {
@@ -48,7 +48,7 @@ namespace SharpRES
             }
         }
 
-        private static void HandleUnpack(string inputFile)
+        private static void HandleUnpack(string inputFile, string[] args)
         {
             if (!File.Exists(inputFile))
             {
@@ -59,6 +59,8 @@ namespace SharpRES
             string extension = Path.GetExtension(inputFile).ToLower();
             if (extension == ".res")
             {
+                bool singleFileMode = args.Contains("-single", StringComparer.OrdinalIgnoreCase);
+
                 bool packageRDP = File.Exists("package.rdp");
                 bool dataRDP = File.Exists("data.rdp");
                 bool patchRDP = File.Exists("patch.rdp");
@@ -69,7 +71,7 @@ namespace SharpRES
                     resFile = new RES_PSP(reader);
                 }
 
-                RESData printer = new RESData(resFile, packageRDP, dataRDP, patchRDP, inputFile);
+                RESData printer = new RESData(resFile, packageRDP, dataRDP, patchRDP, inputFile, singleFileMode: singleFileMode);
                 printer.PrintInformation();
 
                 string jsonOutput = resFile.Serialize();
@@ -368,9 +370,10 @@ namespace SharpRES
 
         private static void PrintUsage()
         {
-            Console.WriteLine("Sharp Eater by Yamato Nagasaki [Experimental Release v1.45]\n- A GOD EATER Tool. Used for RES Unpacking/Repacking\n");
-            Console.WriteLine("Usage for Unpacking: Sharp_EATER.exe -x [input.res|input.rtbl]");
-            Console.WriteLine("--> Generates dictionaries and a JSON file counterpart of the input file.\n");
+            Console.WriteLine("Sharp Eater by Yamato Nagasaki [Experimental Release v1.46]\n- A GOD EATER Tool. Used for RES Unpacking/Repacking\n");
+            Console.WriteLine("Usage for Unpacking: Sharp_EATER.exe -x [input.res|input.rtbl] [-single]");
+            Console.WriteLine("--> Generates dictionaries and a JSON file counterpart of the input file.");
+            Console.WriteLine("    -single: Optional. Unpacks only the specified .res file without processing nested .res files.\n");
             PrintRepackUsage();
         }
 

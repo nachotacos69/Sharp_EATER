@@ -33,8 +33,13 @@ HaoJun/Randerion's GECV: BLZ4 Codes and other structure references
 
 ### Program's arguments (Functions)
 Note: Put a RES file within the same directory as the executable
-- use `-x` for extraction
-- use `-r` for repacking
+1. Unpacking
+- use `-x` for extraction.
+- for single RES file extraction. use `-single` (in case if RES file has nested RES files and only want to interact one file.)
+
+2. Repack
+- use `-r` for repacking.
+- for Repack with Nested. use `-n`
 - use `-E` for enforcement (used for debugging). 
 - Enforcement is used to swap extrernal source's fileset RDP offsets to SET_C or SET_D masking based on population. or swap with one external source to another.. 
 
