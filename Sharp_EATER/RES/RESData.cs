@@ -18,11 +18,13 @@ namespace SharpRES
         private readonly Dictionary<uint, List<string>> _dataDict;
         private readonly Dictionary<uint, List<string>> _patchDict;
         private readonly bool _singleFileMode;
+        private readonly List<object> _resListTracker;
+        private readonly bool _isTopLevelCall;
 
         public RESData(RES_PSP resFile, bool PackageRDP, bool DataRDP, bool PatchRDP, string inputResFile,
             string outputFolder = null, Dictionary<uint, List<string>> packageDict = null,
             Dictionary<uint, List<string>> dataDict = null, Dictionary<uint, List<string>> patchDict = null,
-            bool singleFileMode = false)
+            bool singleFileMode = false, List<object> resListTracker = null)
         {
             _resFile = resFile;
             _PackageRDP = PackageRDP;
@@ -33,7 +35,14 @@ namespace SharpRES
             _packageDict = packageDict;
             _dataDict = dataDict;
             _patchDict = patchDict;
-            _singleFileMode = singleFileMode; // for "-single" args.
+            _singleFileMode = singleFileMode;
+
+            // A "top level call" is one not initiated by another RES or RTBL extraction.
+            // It is responsible for creating and saving the final RESList.json.
+            _isTopLevelCall = (packageDict == null && dataDict == null && patchDict == null);
+
+            // Use the provided tracker, or if it's a top-level call, create a new one.
+            _resListTracker = resListTracker ?? (_isTopLevelCall ? new List<object>() : null);
         }
 
         public void PrintInformation()
@@ -119,8 +128,9 @@ namespace SharpRES
             var packageDict = _packageDict ?? new Dictionary<uint, List<string>>();
             var dataDict = _dataDict ?? new Dictionary<uint, List<string>>();
             var patchDict = _patchDict ?? new Dictionary<uint, List<string>>();
-            // List to hold paths of nested RES files for subsequent extraction
+            // Lists to hold paths of nested archives for subsequent extraction
             List<string> resFiles = new List<string>();
+            List<string> rtblFiles = new List<string>();
 
             for (int i = 0; i < _resFile.Filesets.Count; i++)
             {
@@ -271,9 +281,12 @@ namespace SharpRES
                             Console.WriteLine($"Fileset {i + 1}: Extracted {chunk.Length} bytes (raw) to {outputPath}");
                     }
 
-                    // Track .res files for nested extraction
-                    if (Path.GetExtension(outputPath).ToLower() == ".res")
+                    // Track nested archives for subsequent processing
+                    string extension = Path.GetExtension(outputPath).ToLower();
+                    if (extension == ".res")
                         resFiles.Add(outputPath);
+                    else if (extension == ".rtbl")
+                        rtblFiles.Add(outputPath);
 
                     // Mark file as created
                     existingFiles.Add(outputPath);
@@ -287,22 +300,48 @@ namespace SharpRES
                 }
             }
 
-            // Perform nested .res extraction, passing dictionaries for aggregation
+            // Perform nested archive extraction, passing dictionaries for aggregation
             if (!_singleFileMode)
             {
+                ExtractNestedRtblFiles(rtblFiles, packageDict, dataDict, patchDict);
                 ExtractNestedResFiles(resFiles, packageDict, dataDict, patchDict);
             }
-            else if (resFiles.Count > 0)
+            else if (resFiles.Count > 0 || rtblFiles.Count > 0)
             {
-                Console.WriteLine($"\nSkipping {resFiles.Count} nested RES file(s). '-single' args applied on this session.");
+                Console.WriteLine($"\nSkipping extraction of {resFiles.Count} nested RES and {rtblFiles.Count} nested RTBL file(s) due to -single flag.");
             }
 
-            // Serialize dictionaries for standalone RES extraction after all files (including nested) are processed
-            if (_packageDict == null && _dataDict == null && _patchDict == null)
+            // Finalization steps should only be run by the top-level call that started the whole process.
+            if (_isTopLevelCall)
             {
                 SerializeRDPDictionaries(packageDict, "packageDict.json");
                 SerializeRDPDictionaries(dataDict, "dataDict.json");
                 SerializeRDPDictionaries(patchDict, "patchDict.json");
+
+                // Serialize the master list of all found nested RES files.
+                SerializeResList();
+            }
+        }
+
+        private void ExtractNestedRtblFiles(List<string> rtblFiles, Dictionary<uint, List<string>> packageDict, Dictionary<uint, List<string>> dataDict, Dictionary<uint, List<string>> patchDict)
+        {
+            if (rtblFiles.Count == 0) return;
+
+            Console.WriteLine($"\n=== Processing {rtblFiles.Count} Nested RTBL Files ===");
+
+            foreach (var rtblFilePath in rtblFiles)
+            {
+                Console.WriteLine($"\n--- Processing nested RTBL file: {rtblFilePath} ---");
+                try
+                {
+                    RTBL rtblFile = new RTBL(rtblFilePath);
+                    // Pass the dictionaries and the master tracker down.
+                    rtblFile.Unpack(packageDict, dataDict, patchDict, _resListTracker);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to process nested RTBL file {rtblFilePath}: {ex.Message}");
+                }
             }
         }
 
@@ -311,9 +350,6 @@ namespace SharpRES
             if (resFiles.Count == 0) return;
 
             Console.WriteLine($"\n=== Extracting {resFiles.Count} Nested RES Files ===");
-
-            // Track RES files for RESList.json
-            var resList = new List<object>();
 
             for (int i = 0; i < resFiles.Count; i++)
             {
@@ -329,7 +365,8 @@ namespace SharpRES
                     }
 
                     string resOutputFolder = Path.Combine(Path.GetDirectoryName(resFilePath), Path.GetFileNameWithoutExtension(resFilePath));
-                    RESData resData = new RESData(resFile, _PackageRDP, _DataRDP, _PatchRDP, resFilePath, resOutputFolder, packageDict, dataDict, patchDict);
+                    // Pass the tracker down to the next level of extraction.
+                    RESData resData = new RESData(resFile, _PackageRDP, _DataRDP, _PatchRDP, resFilePath, resOutputFolder, packageDict, dataDict, patchDict, false, _resListTracker);
                     resData.PrintInformation();
 
                     // Serialize nested RES file to JSON in its parent's output folder
@@ -338,10 +375,10 @@ namespace SharpRES
                     File.WriteAllText(outputJsonFile, jsonOutput);
                     Console.WriteLine($"Nested RES serialization complete. Output saved to {outputJsonFile}");
 
-                    // Add to RESList
-                    resList.Add(new
+                    // Add to the unified RESList tracker.
+                    _resListTracker?.Add(new
                     {
-                        Index = i + 1,
+                        Index = _resListTracker.Count + 1,
                         ResFilePath = resFilePath,
                         JsonFilePath = outputJsonFile
                     });
@@ -351,23 +388,27 @@ namespace SharpRES
                     Console.WriteLine($"Failed to process nested RES file {resFilePath}: {ex.Message}");
                 }
             }
+        }
 
-            // Serialize RESList.json
-            if (resList.Count > 0)
+        private void SerializeResList()
+        {
+            if (_resListTracker == null || _resListTracker.Count == 0)
             {
-                var outputDir = Path.GetDirectoryName(_inputResFile);
-                var resListPath = string.IsNullOrEmpty(outputDir) ? "RESList.json" : Path.Combine(outputDir, "RESList.json");
-                var options = new JsonSerializerOptions
-                {
-                    WriteIndented = true,
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                };
-                string jsonOutput = JsonSerializer.Serialize(resList, options);
-                if (!string.IsNullOrEmpty(Path.GetDirectoryName(resListPath)))
-                    Directory.CreateDirectory(Path.GetDirectoryName(resListPath));
-                File.WriteAllText(resListPath, jsonOutput);
-                Console.WriteLine($"\nRESList saved to {resListPath}");
+                return;
             }
+
+            var outputDir = Path.GetDirectoryName(_inputResFile);
+            var resListPath = string.IsNullOrEmpty(outputDir) ? "RESList.json" : Path.Combine(outputDir, "RESList.json");
+            var options = new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            };
+            string jsonOutput = JsonSerializer.Serialize(_resListTracker, options);
+            if (!string.IsNullOrEmpty(Path.GetDirectoryName(resListPath)))
+                Directory.CreateDirectory(Path.GetDirectoryName(resListPath));
+            File.WriteAllText(resListPath, jsonOutput);
+            Console.WriteLine($"\nRESList saved to {resListPath}");
         }
 
         private void SerializeRDPDictionaries(Dictionary<uint, List<string>> dict, string outputFileName)
