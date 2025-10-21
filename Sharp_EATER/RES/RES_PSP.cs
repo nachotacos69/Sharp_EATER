@@ -92,7 +92,7 @@ namespace SharpRES
             string updateAddressMode = GetAddressMode(UpdateDataOffset);
             UpdateDataRealOffset = ProcessOffset(UpdateDataOffset, updateAddressMode);
 
-            reader.BaseStream.Seek(4, SeekOrigin.Current); // Skip 12 bytes padding
+            reader.BaseStream.Seek(4, SeekOrigin.Current); // Skip 4 bytes padding
 
             // Read DataSets (64 bytes total, 8 bytes per group)
             reader.BaseStream.Seek(GroupOffset, SeekOrigin.Begin);
