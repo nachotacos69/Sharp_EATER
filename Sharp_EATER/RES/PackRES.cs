@@ -39,6 +39,9 @@ namespace SharpRES
             public byte GroupCount { get; set; }
             public uint UNK1 { get; set; }
             public uint Configs { get; set; }
+            public uint UpdateDataOffset { get; set; }
+            public uint UpdateDataRealOffset { get; set; }
+            public uint UpdateDataSize { get; set; }
             public List<JsonDataSet> DataSets { get; set; }
             public List<JsonFileset> Filesets { get; set; }
         }
@@ -323,7 +326,7 @@ namespace SharpRES
                     // --- PASS 3: WRITE FINAL METADATA ---
                     Console.WriteLine("\n=== Pass 3: Writing Final Metadata ===");
                     outputStream.Seek(0, SeekOrigin.Begin);
-                    writer.Write(_jsonData.MagicHeader); writer.Write(_jsonData.GroupOffset); writer.Write(_jsonData.GroupCount); writer.Write(_jsonData.UNK1); writer.Write(new byte[3]); writer.Write(newConfigsValue); writer.Write(new byte[12]);
+                    writer.Write(_jsonData.MagicHeader); writer.Write(_jsonData.GroupOffset); writer.Write(_jsonData.GroupCount); writer.Write(_jsonData.UNK1); writer.Write(new byte[3]); writer.Write(newConfigsValue); writer.Write(_jsonData.UpdateDataOffset); writer.Write(_jsonData.UpdateDataSize); writer.Write(new byte[4]);
                     outputStream.Seek(_jsonData.GroupOffset, SeekOrigin.Begin);
                     foreach (var ds in _jsonData.DataSets) { writer.Write(ds.Offset); writer.Write(ds.Count); }
 

@@ -11,8 +11,8 @@ Group Count (int8): total count of the groups.
 Unknown (int32): not sure about this data here.
 Padding (int24): 3 bytes.
 Config (int32): overall size of the information [header to the name structures] (before chunks of data)
-DLC Info 1 (int32): a offset for specific RES file need to seek (ex: god_menu.res [patch] needs to seek god_menu.res [original]) 
-DLC Info 2 (int32): size of that specific RES file that's being seeked and use its data
+UpdateDataOffset (int32): a offset for specific RES file need to seek (ex: god_menu.res [patch] needs to seek god_menu.res [original]) 
+UpdateDataSize (int32): size of that specific RES file that's being seeked and use its data
 Padding (int32): 4 bytes
 --FIXED HEADER SIZE = 32 bytes
 Note: check DLC Info on the end of the docs.
@@ -68,13 +68,20 @@ Note: use Chunk Name to control the pointers you need to read.
 
 
 ====DLC Info
-- the DLC Section usually seeks the original SET_C or SET_D types of data on that specific file.
-- does not apply on RDP related Address Modes.
-- tinker around to find the right recipe
+- The DLC Section usually is a updated version of the RES file. thus it either extends the original RES file's fileset.
+  the DLC type of RES file still checks for that base RES file...
+  In certain moments, it still seeks some original SET_C or SET_D filesets on the Original/Base RES file.
+  
+- certain filesets with their SET_C/SET_D will have its own PATCH version if that specific file is updated.
+  So you'll see a `god_game.tr2` in a Base RES file in a SET_C fileset addressMode, but in the DLC Type of RES file. that `god_game.tr2` is now a PATCH AddressMode
+- tinker around to find the right recipe to properly extract its content.
 
-// Example:
+// Example on doing some modification:
 - if DLC RES file's SET_C seeks "MS_010N_calig.res", and the size does not match with the original counterpart being checked.
-  because you modified the original data and the size range changed. the game does not load that, and DLC pop up error will occur.
-- To counter this, you need to update the original data size to match in DLC's SET_C.
-- Or put the new modified data on the EOF of either on "Data, Package, or Patch" RDP files, divide the offset by 800 => [offset / 0x800]
+  because you modified the original data and the size range changed. the game does not load that, and a DLC pop up error will occur.
+
+- To counter this, you need to update the original data size to match in DLC's SET_C 
+  (if i remember correctly once you update a Original/Base RES file, you have to write the new information on the DLC counterpart of that RES file).
+
+- Another method is put the new modified data on the EOF of either on "Data, Package, or Patch" RDP files, divide the offset by 800 => [offset / 0x800]
   then use the divided offset to update the SET_C raw offset to the Patch Address Mode offset. (0xC01000 to 0x608000)

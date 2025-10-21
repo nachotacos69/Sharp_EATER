@@ -16,7 +16,10 @@ namespace SharpRES
         public uint UNK1 { get; private set; } // 4 bytes, undocumented
         // 3 bytes padding (skipped)
         public uint Configs { get; private set; } // 4 bytes, length of overall configuration (from header to the name structure before hitting some fileset chunks)
-        // 12 bytes padding (skipped)
+        public uint UpdateDataOffset { get; private set; } // 4 bytes, raw offset with address mode. Seeks the Original/Base RES file.
+        public uint UpdateDataRealOffset { get; private set; } // Processed offset after masking (still same procedure with Raw -> Real Offset conversion).
+        public uint UpdateDataSize { get; private set; } // 4 bytes, size value of Original/Base RES file.
+        // 4 bytes padding (skipped)
         // Total: 32 bytes. (4 + 4 + 1 + 4 + 3 + 4 + 12 = 32)
 
         // DataSet structure (8 bytes per group)
@@ -82,7 +85,14 @@ namespace SharpRES
             UNK1 = reader.ReadUInt32();
             reader.BaseStream.Seek(3, SeekOrigin.Current); // Skip 3 bytes padding
             Configs = reader.ReadUInt32();
-            reader.BaseStream.Seek(12, SeekOrigin.Current); // Skip 12 bytes padding
+            // Read UpdateData fields (8 bytes)
+            UpdateDataOffset = reader.ReadUInt32();
+            UpdateDataSize = reader.ReadUInt32();
+            // Process the real offset based on address mode
+            string updateAddressMode = GetAddressMode(UpdateDataOffset);
+            UpdateDataRealOffset = ProcessOffset(UpdateDataOffset, updateAddressMode);
+
+            reader.BaseStream.Seek(4, SeekOrigin.Current); // Skip 12 bytes padding
 
             // Read DataSets (64 bytes total, 8 bytes per group)
             reader.BaseStream.Seek(GroupOffset, SeekOrigin.Begin);
@@ -203,6 +213,9 @@ namespace SharpRES
                 GroupCount,
                 UNK1,
                 Configs,
+                UpdateDataOffset,
+                UpdateDataRealOffset,
+                UpdateDataSize,
                 DataSets = DataSets.Select(ds => new
                 {
                     ds.Offset,

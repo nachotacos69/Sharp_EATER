@@ -53,6 +53,8 @@ namespace SharpRES
             Console.WriteLine($"Group Offset: 0x{_resFile.GroupOffset:X8}");
             Console.WriteLine($"Group Count: {_resFile.GroupCount}");
             Console.WriteLine($"Configs Offset: 0x{_resFile.Configs:X8}");
+            Console.WriteLine($"Update Data Offset + Update Data RealOffset: 0x{_resFile.UpdateDataOffset:X8} (0x{_resFile.UpdateDataRealOffset:X8})");
+            Console.WriteLine($"Update Data Size: 0x{_resFile.UpdateDataSize:X8}");
             Console.WriteLine();
 
             // Print DataSets
