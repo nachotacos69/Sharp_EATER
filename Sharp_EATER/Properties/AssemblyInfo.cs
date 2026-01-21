@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
 [assembly: AssemblyTitle("Sharp_EATER")]
-[assembly: AssemblyDescription("Tool for specific God Eater Games")]
+[assembly: AssemblyDescription("Experimental tool for supported God Eater Games")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("nachotacos69")]
@@ -32,5 +32,5 @@ using System.Runtime.InteropServices;
 // You can specify all the values or you can default the Build and Revision Numbers
 // by using the '*' as shown below:
 // [assembly: AssemblyVersion("1.0.*")]
-[assembly: AssemblyVersion("1.47")]
-[assembly: AssemblyFileVersion("1.47")]
+[assembly: AssemblyVersion("1.48")]
+[assembly: AssemblyFileVersion("1.48")]

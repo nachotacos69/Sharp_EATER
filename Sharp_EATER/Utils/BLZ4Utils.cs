@@ -1,5 +1,5 @@
 ﻿/*
- * THIS CODE IS FROM HAOJUN/RANDERION
+ * THIS CODE IS ORIGINALLY FROM HAOJUN/RANDERION. BUT CLEANED UP
  * LINK: https://github.com/HaoJun0823/GECV-OLD
  */
 
@@ -11,6 +11,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
+using LibDeflate; // ZLIB's libdeflate for get more small size compressed data.
 
 namespace SharpRES
 {
@@ -47,43 +48,19 @@ namespace SharpRES
         }
 
 
-        //// partially from http://stackoverflow.com/a/6627194/5343630
-        //public static void CompressData(byte[] inData, out byte[] outData)
-        //{
-        //    using (MemoryStream outMemoryStream = new MemoryStream())
-        //    using (ZLibStream outZStream = new ZLibStream(outMemoryStream,CompressionLevel.SmallestSize))
-        //    using (Stream inMemoryStream = new MemoryStream(inData))
-        //    {
-        //        CopyStream(inMemoryStream, outZStream);
-        //        outZStream.Dispose();
-        //        outData = outMemoryStream.ToArray();
-
-        //    }
-        //}
-
-        //public static void DecompressData(byte[] inData, out byte[] outData)
-        //{
-        //    using (MemoryStream outMemoryStream = new MemoryStream())
-        //    using (ZLibStream outZStream = new ZLibStream(outMemoryStream,CompressionLevel.SmallestSize))
-        //    using (Stream inMemoryStream = new MemoryStream(inData))
-        //    {
-        //        CopyStream(inMemoryStream, outZStream);
-        //        outZStream.Dispose();
-        //        outData = outMemoryStream.ToArray();
-        //    }
-        //}
-
-        // partially from http://stackoverflow.com/a/6627194/5343630
         public static void CompressData(byte[] inData, out byte[] outData)
         {
-            using (MemoryStream outMemoryStream = new MemoryStream())
-            using (ZOutputStream outZStream = new ZOutputStream(outMemoryStream, zlibConst.Z_BEST_COMPRESSION))
-            using (Stream inMemoryStream = new MemoryStream(inData))
+            using (var compressor = new ZlibCompressor(compressionLevel: 9)) // BEST COMPRESSION: 9
             {
-                CopyStream(inMemoryStream, outZStream);
-                outZStream.finish();
-                outData = outMemoryStream.ToArray();
+                using (var compressedMemory = compressor.Compress(inData))
+                {
+                    if (compressedMemory == null) // just in case
+                    {
+                        throw new InvalidOperationException($"Compression failed: output would be larger than input ({inData.Length} bytes)");
+                    }
 
+                    outData = compressedMemory.Memory.ToArray();
+                }
             }
         }
 
@@ -243,18 +220,6 @@ namespace SharpRES
                         }
                     }
 
-
-
-
-
-                    //long limit = bw.BaseStream.Position;
-                    //ms.Seek(0, SeekOrigin.Begin);
-
-                    //byte[] result = new byte[limit];
-                    //ms.Read(result, 0, result.Length);
-
-                    // Console.WriteLine($"BLZ4:Header:{BLZ4_HEADER},Original Length:{file_data.Length},MD5:{FileUtils.GetByteArrayString(retVal)},Block Count:{split_data.Count}.");
-
                     byte[] result = ms.ToArray();
 
 
@@ -262,8 +227,6 @@ namespace SharpRES
                     {
                         throw new InvalidDataException($"BLZ4 Build Error!");
                     }
-
-                    //File.WriteAllBytes("E:\\PRES\\TEST\\"+FileUtils.GetByteArrayString(retVal),result);
 
                     return result;
                 }

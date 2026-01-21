@@ -370,7 +370,7 @@ namespace SharpRES
 
         private static void PrintUsage()
         {
-            Console.WriteLine("Sharp Eater by Yamato Nagasaki [Experimental Release v1.47]\n- A GOD EATER Tool. Used for RES Unpacking/Repacking\n");
+            Console.WriteLine("Sharp Eater by Yamato Nagasaki [Experimental Release v1.48]\n- A GOD EATER Tool. Used for RES Unpacking/Repacking\n");
             Console.WriteLine("Usage for Unpacking: Sharp_EATER.exe -x [input.res|input.rtbl] [-single]");
             Console.WriteLine("--> Generates dictionaries and a JSON file counterpart of the input file.");
             Console.WriteLine("    -single: Optional. Unpacks only the specified .res file without processing nested .res files.\n");
@@ -381,14 +381,14 @@ namespace SharpRES
         {
             Console.WriteLine("Usage for Repacking:");
             Console.WriteLine(" (Basic/Normal) Sharp_EATER.exe -r [input.res] [input.json] [-E rule]");
-            Console.WriteLine(" (Repack with Nested) Sharp_EATER.exe -r [parent.res] -n [RESList.json] [-E rule]\n");
-            Console.WriteLine("Enforcement Rule (-E) Details:");
-            Console.WriteLine("  The -E flag modifies where file data is stored during repack.");
+            Console.WriteLine(" (Repack with Nested and other methods) Sharp_EATER.exe -r [parent.res] -n [RESList.json] [-E rule]\n");
+            Console.WriteLine("Arguments:");
+            Console.WriteLine("  Enforcement rule: Modifies where file data is stored during repack.");
             Console.WriteLine("  Format: 'SourceMode(s)=TargetMode'");
-            Console.WriteLine("  Modes can be names (Package, Data, Patch, SET_C, SET_D) or hex (0x40, 0x50, 0x60, 0xC0, 0xD0.).\n");
-            Console.WriteLine("  Example 1 (Embed in RES): Sharp_EATER.exe -r file.res file.json -E Package,Data=SET_C");
+            Console.WriteLine("  Modes: Package(0x40), Data(0x50), Patch(0x60), SET_C(0xC0), SET_D(0xD0).");
+            Console.WriteLine("  Example 1 (Embed in RES): -E Package,Data=SET_C");
             Console.WriteLine("    --> Moves files from package.rdp and data.rdp into file.res.\n");
-            Console.WriteLine("  Example 2 (Move to RDP): Sharp_EATER.exe -r file.res file.json -E Package=Patch");
+            Console.WriteLine("  Example 2 (Move to RDP): -E 0x40=0x60.");
             Console.WriteLine("    --> Moves files from package.rdp to the end of patch.rdp.");
         }
 
