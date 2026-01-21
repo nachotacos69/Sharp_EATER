@@ -383,7 +383,7 @@ namespace SharpRES
             Console.WriteLine(" (Basic/Normal) Sharp_EATER.exe -r [input.res] [input.json] [-E rule]");
             Console.WriteLine(" (Repack with Nested and other methods) Sharp_EATER.exe -r [parent.res] -n [RESList.json] [-E rule]\n");
             Console.WriteLine("Arguments:");
-            Console.WriteLine("  Enforcement rule: Modifies where file data is stored during repack.");
+            Console.WriteLine("  Enforcement rule (-E): Modifies where file data is stored during repack.");
             Console.WriteLine("  Format: 'SourceMode(s)=TargetMode'");
             Console.WriteLine("  Modes: Package(0x40), Data(0x50), Patch(0x60), SET_C(0xC0), SET_D(0xD0).");
             Console.WriteLine("  Example 1 (Embed in RES): -E Package,Data=SET_C");
