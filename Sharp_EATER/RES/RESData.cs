@@ -235,11 +235,29 @@ namespace SharpRES
                     }
                     else
                     {
+                        /* ======WORKAROUND for some Filesets with weird size values======
+                         - which some cases with Chunk Names that have 1 in their value by default
+                         - They state their size incorrectly but for some reason the game runs normally with it.
+                         - I'm just gonna add this here in case of weird rebuilding structure issues.
+                        */
+
+                        // Handle special case: ChunkName 1 with SET_C/SET_D has data stacked between RealOffset and OffsetName
+                        uint actualReadSize = fileset.Size;
+                        bool isStackedData = false;
+
+                        if (fileset.ChunkName == 1 && (fileset.AddressMode == "SET_C" || fileset.AddressMode == "SET_D") && fileset.OffsetName > fileset.RealOffset)
+                        {
+                            actualReadSize = fileset.OffsetName - fileset.RealOffset;
+                            fileset.UnpackSize = actualReadSize;
+                            isStackedData = true;
+                            Console.WriteLine($"Fileset {i + 1}: Detected stacked data (ChunkName=1). Calculated actual size: {actualReadSize} bytes (Original size: {fileset.Size} bytes)");
+                        }
+
                         byte[] chunk;
                         using (BinaryReader reader = new BinaryReader(File.Open(sourceFile, FileMode.Open)))
                         {
                             reader.BaseStream.Seek(fileset.RealOffset, SeekOrigin.Begin);
-                            chunk = reader.ReadBytes((int)fileset.Size);
+                            chunk = reader.ReadBytes((int)actualReadSize);
                         }
 
                         byte[] outputData;
@@ -279,6 +297,8 @@ namespace SharpRES
                             Console.WriteLine($"Fileset {i + 1}: Decompressed BLZ4 {chunk.Length} bytes to {outputData.Length} bytes at {outputPath}");
                         else if (isBLZ2)
                             Console.WriteLine($"Fileset {i + 1}: Decompressed BLZ2 {chunk.Length} bytes to {outputData.Length} bytes at {outputPath}");
+                        else if (isStackedData)
+                            Console.WriteLine($"Fileset {i + 1}: Extracted {chunk.Length} bytes (stacked data) to {outputPath}");
                         else
                             Console.WriteLine($"Fileset {i + 1}: Extracted {chunk.Length} bytes (raw) to {outputPath}");
                     }

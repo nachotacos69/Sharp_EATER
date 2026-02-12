@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Reflection; 
+
+
 
 namespace SharpRES
 {
@@ -370,7 +373,9 @@ namespace SharpRES
 
         private static void PrintUsage()
         {
-            Console.WriteLine("Sharp Eater by Yamato Nagasaki [Experimental Release v1.48]\n- A GOD EATER Tool. Used for RES Unpacking/Repacking\n");
+            Assembly assembly = Assembly.GetExecutingAssembly(); 
+            Version version = assembly.GetName().Version;
+            Console.WriteLine($"Sharp Eater by Yamato Nagasaki [Experimental Release v{version}]\n- A GOD EATER Tool. Used for RES Unpacking/Repacking\n");
             Console.WriteLine("Usage for Unpacking: Sharp_EATER.exe -x [input.res|input.rtbl] [-single]");
             Console.WriteLine("--> Generates dictionaries and a JSON file counterpart of the input file.");
             Console.WriteLine("    -single: Optional. Unpacks only the specified .res file without processing nested .res files.\n");
