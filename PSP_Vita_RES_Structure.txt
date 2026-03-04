@@ -1,15 +1,13 @@
 # This supports both PSP and Vita
 
-RES Structure Information
 
 
-
-====Header Information
+>>> Header Information
 Magic Number (int32): Header of the file. '0x73657250' or 'Pres'.
 Group Offset (int32): pointer for the dataset.
 Group Count (int8): total count of the groups.
-Unknown (int32): not sure about this data here.
-Padding (int24): 3 bytes.
+Version (int8): version of the RES file.
+Unknown (6 bytes): not documented yet. skip.
 Config (int32): overall size of the information [header to the name structures] (before chunks of data)
 UpdateDataOffset (int32): a offset for specific RES file need to seek (ex: god_menu.res [patch] needs to seek god_menu.res [original]) 
 UpdateDataSize (int32): size of that specific RES file that's being seeked and use its data
@@ -18,7 +16,7 @@ Padding (int32): 4 bytes
 Note: check DLC Info on the end of the docs.
 
 
-====DataSet Information
+>>> DataSet Information
 DataSet Offset (int32): offset of where the FileSet is located.
 DataSet Count (int32): how many sets/files within that FileSet.
 --FIXED DataSet Size = 64 bytes (4 + 4 = 8 bytes * 8 groups counts = 64 bytes)
@@ -26,9 +24,9 @@ Note: 1 group = 8 bytes. the game uses 8 groups in total as base but we will let
 
 
 
-====FileSet Information
+>>> FileSet Information
 Raw Offset (int32): offset information.
-Real Offset (int32): converting Raw Offset to Real Offset. This is the one you need to use when seeking data. (not part of the FileSet structure)
+Real Offset (int32): converting Raw Offset to Real Offset. This is the one you need to use when seeking data. (this is not part of the FileSet structure)
 Size (int32): size of that data.
 Offset Name (int32): offset of the Name Pointers for this FileSet.
 Chunk Name (int32): defines how many pointers for that Offset Name.
@@ -56,14 +54,16 @@ Unpack Size (int32): true/raw size of that data when decompressed. (if not compr
 
 
 
-====Name Pointers
+>>> Name Pointers
 Pointers (int32): these pointers leads to the fileset's actual file name.
 -- Name Pointers Size = vary, but max size is 20 bytes (4 + 4 + 4 + 4)
-Note: use Chunk Name to control the pointers you need to read.
 // Example:
 - if Offset Name is 0x2000, and has 3 Chunk Name value. check 0x2000, read each pointers by 4 bytes each.
 - since chunk name value equivalents to 4 bytes. so 4 bytes * 3 = 12 bytes, cut 12 bytes by 4, you get 3 pointers
-
+Note:
+? use Chunk Name to control the pointers you need to read. if chunkname = 1, expect to get its data between Offset and OffsetName.
+? since the size given for that filset is incorrect so you'll have to do workarounds to get the real size. and the original size should be kept the same.
+? repacking that file with its original size will work. but using the correct size of that file will crash the game.
 
 
 ====DLC Info
