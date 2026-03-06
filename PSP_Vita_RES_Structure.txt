@@ -6,7 +6,7 @@
 Magic Number (int32): Header of the file. '0x73657250' or 'Pres'.
 Group Offset (int32): pointer for the dataset.
 Group Count (int8): total count of the groups.
-Version (int8): version of the RES file.
+Version (int8): version of the RES file. the game expects the version is equal to 3 by default. if not, this will cause mismatch.
 Unknown (6 bytes): not documented yet. skip.
 Config (int32): overall size of the information [header to the name structures] (before chunks of data)
 UpdateDataOffset (int32): a offset for specific RES file need to seek (ex: god_menu.res [patch] needs to seek god_menu.res [original]) 
