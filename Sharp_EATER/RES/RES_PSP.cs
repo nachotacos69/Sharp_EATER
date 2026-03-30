@@ -13,14 +13,15 @@ namespace SharpRES
         public uint MagicHeader { get; private set; } // 4 bytes, expected 0x73657250
         public uint GroupOffset { get; private set; } // 4 bytes, offset to DataSet
         public byte GroupCount { get; private set; } // 1 byte, number of DataSet groups
+        public byte GroupVersion { get; private set; } // 1 byte, number of DataSet groups
         public uint UNK1 { get; private set; } // 4 bytes, undocumented
-        // 3 bytes padding (skipped)
+        // 2 bytes skipped
         public uint Configs { get; private set; } // 4 bytes, length of overall configuration (from header to the name structure before hitting some fileset chunks)
         public uint UpdateDataOffset { get; private set; } // 4 bytes, raw offset with address mode. Seeks the Original/Base RES file.
         public uint UpdateDataRealOffset { get; private set; } // Processed offset after masking (still same procedure with Raw -> Real Offset conversion).
         public uint UpdateDataSize { get; private set; } // 4 bytes, size value of Original/Base RES file.
         // 4 bytes padding (skipped)
-        // Total: 32 bytes. (4 + 4 + 1 + 4 + 3 + 4 + 12 = 32)
+        // Total: 32 bytes. (4 + 4 + 1 + 1 + 6 + 4 + 4 + 4 + 4 = 32)
 
         // DataSet structure (8 bytes per group)
         public class DataSet
@@ -82,8 +83,9 @@ namespace SharpRES
 
             GroupOffset = reader.ReadUInt32();
             GroupCount = reader.ReadByte();
+            GroupVersion = reader.ReadByte();
             UNK1 = reader.ReadUInt32();
-            reader.BaseStream.Seek(3, SeekOrigin.Current); // Skip 3 bytes padding
+            reader.BaseStream.Seek(2, SeekOrigin.Current); // Skip 2 bytes padding
             Configs = reader.ReadUInt32();
             // Read UpdateData fields (8 bytes)
             UpdateDataOffset = reader.ReadUInt32();
@@ -211,6 +213,7 @@ namespace SharpRES
                 MagicHeader,
                 GroupOffset,
                 GroupCount,
+                GroupVersion,
                 UNK1,
                 Configs,
                 UpdateDataOffset,

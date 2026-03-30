@@ -7,7 +7,7 @@ Magic Number (int32): Header of the file. '0x73657250' or 'Pres'.
 Group Offset (int32): pointer for the dataset.
 Group Count (int8): total count of the groups.
 Version (int8): version of the RES file. the game expects the version is equal to 3 by default. if not, this will cause mismatch.
-Unknown (6 bytes): not documented yet. skip.
+Unknown (6 bytes): not documented yet. skip. this also includes the UNK1 (int32) + 2 bytes padding
 Config (int32): overall size of the information [header to the name structures] (before chunks of data)
 UpdateDataOffset (int32): a offset for specific RES file need to seek (ex: god_menu.res [patch] needs to seek god_menu.res [original]) 
 UpdateDataSize (int32): size of that specific RES file that's being seeked and use its data
@@ -42,7 +42,7 @@ Unpack Size (int32): true/raw size of that data when decompressed. (if not compr
 0x60 = Patch (external file source = patch.rdp)
 0xC0 = Current (i call this SET_C)
 0xD0 = Current (i call this SET_D. same function as SET_C, but sometimes appears on different RES files)
->> Converting Raw Offset to Real Offset requires you to do bitshifting, the bit shift values can be Right Shift "24" or "28" but i do the 24.
+>> Converting Raw Offset to Real Offset requires you to do bitshifting, the bit shift values can be Right Shift "24" or "28" but i do the "24".
 - for Reserve. these stuff usually are empty files, some are valid but placed in `bin` folders. usually contain `self` modules.
 - for DataSets. they exist as folders (data_[value]). only to interact with their `size` value if you changed something with a specific file.
 - for SET_C and SET_D. their data is located within the current RES file you are reading or checking out (exclude multiplication).

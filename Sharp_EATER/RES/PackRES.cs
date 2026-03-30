@@ -37,6 +37,7 @@ namespace SharpRES
             public uint MagicHeader { get; set; }
             public uint GroupOffset { get; set; }
             public byte GroupCount { get; set; }
+            public byte GroupVersion { get; set; }
             public uint UNK1 { get; set; }
             public uint Configs { get; set; }
             public uint UpdateDataOffset { get; set; }
@@ -355,7 +356,7 @@ namespace SharpRES
                     // --- PASS 3: WRITE FINAL METADATA ---
                     Console.WriteLine("\n=== Pass 3: Writing Final Metadata ===");
                     outputStream.Seek(0, SeekOrigin.Begin);
-                    writer.Write(_jsonData.MagicHeader); writer.Write(_jsonData.GroupOffset); writer.Write(_jsonData.GroupCount); writer.Write(_jsonData.UNK1); writer.Write(new byte[3]); writer.Write(newConfigsValue); writer.Write(_jsonData.UpdateDataOffset); writer.Write(_jsonData.UpdateDataSize); writer.Write(new byte[4]);
+                    writer.Write(_jsonData.MagicHeader); writer.Write(_jsonData.GroupOffset); writer.Write(_jsonData.GroupCount); writer.Write(_jsonData.GroupVersion); writer.Write(_jsonData.UNK1); writer.Write(new byte[2]); writer.Write(newConfigsValue); writer.Write(_jsonData.UpdateDataOffset); writer.Write(_jsonData.UpdateDataSize); writer.Write(new byte[4]);
                     outputStream.Seek(_jsonData.GroupOffset, SeekOrigin.Begin);
                     foreach (var ds in _jsonData.DataSets) { writer.Write(ds.Offset); writer.Write(ds.Count); }
 
@@ -508,6 +509,7 @@ namespace SharpRES
             if (_resFile.MagicHeader != _jsonData.MagicHeader) throw new InvalidDataException("MagicHeader mismatch");
             if (_resFile.GroupOffset != _jsonData.GroupOffset) throw new InvalidDataException("GroupOffset mismatch");
             if (_resFile.GroupCount != _jsonData.GroupCount) throw new InvalidDataException("GroupCount mismatch");
+            if (_resFile.GroupVersion != _jsonData.GroupVersion) throw new InvalidDataException("GroupVersion mismatch");
             if (_resFile.UNK1 != _jsonData.UNK1) throw new InvalidDataException("UNK1 mismatch");
             if (_resFile.Configs != _jsonData.Configs) throw new InvalidDataException("Configs mismatch");
             if (_resFile.DataSets.Count != _jsonData.DataSets.Count) throw new InvalidDataException("DataSets count mismatch");
