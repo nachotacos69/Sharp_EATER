@@ -13,7 +13,7 @@ namespace SharpRES
         public uint MagicHeader { get; private set; } // 4 bytes, expected 0x73657250
         public uint GroupOffset { get; private set; } // 4 bytes, offset to DataSet
         public byte GroupCount { get; private set; } // 1 byte, number of DataSet groups
-        public byte GroupVersion { get; private set; } // 1 byte, number of DataSet groups
+        public byte Version { get; private set; } // 1 byte, version of RES file.
         public uint UNK1 { get; private set; } // 4 bytes, undocumented
         // 2 bytes skipped
         public uint Configs { get; private set; } // 4 bytes, length of overall configuration (from header to the name structure before hitting some fileset chunks)
@@ -83,7 +83,7 @@ namespace SharpRES
 
             GroupOffset = reader.ReadUInt32();
             GroupCount = reader.ReadByte();
-            GroupVersion = reader.ReadByte();
+            Version = reader.ReadByte();
             UNK1 = reader.ReadUInt32();
             reader.BaseStream.Seek(2, SeekOrigin.Current); // Skip 2 bytes padding
             Configs = reader.ReadUInt32();
@@ -213,7 +213,7 @@ namespace SharpRES
                 MagicHeader,
                 GroupOffset,
                 GroupCount,
-                GroupVersion,
+                Version,
                 UNK1,
                 Configs,
                 UpdateDataOffset,
