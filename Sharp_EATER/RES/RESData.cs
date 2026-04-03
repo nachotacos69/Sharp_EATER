@@ -47,7 +47,7 @@ namespace SharpRES
 
         public void PrintInformation()
         {
-            // Print Header
+
             Console.WriteLine("=== Header ===");
             Console.WriteLine($"Magic Header: 0x{_resFile.MagicHeader:X8}");
             Console.WriteLine($"Group Offset: 0x{_resFile.GroupOffset:X8}");
@@ -58,7 +58,7 @@ namespace SharpRES
             Console.WriteLine($"Update Data Size: 0x{_resFile.UpdateDataSize:X8}");
             Console.WriteLine();
 
-            // Print DataSets
+
             Console.WriteLine("=== DataSets ===");
             for (int i = 0; i < _resFile.DataSets.Count; i++)
             {
@@ -67,7 +67,7 @@ namespace SharpRES
             }
             Console.WriteLine();
 
-            // Print Filesets
+
             Console.WriteLine("=== Filesets ===");
             for (int i = 0; i < _resFile.Filesets.Count; i++)
             {
@@ -79,7 +79,7 @@ namespace SharpRES
                     Console.WriteLine($"Fileset {i + 1}: [Reserve/Dummy]");
                     continue;
                 }
-                // Print Reserve/Empty filesets
+
                 else if (fileset.RawOffset == 0 && fileset.Size == 0 && fileset.OffsetName != 0 && fileset.ChunkName != 0 && fileset.UnpackSize == 0)
                 {
                     Console.WriteLine($"Fileset {i + 1}: [Reserve/Empty]");
@@ -89,11 +89,11 @@ namespace SharpRES
                 // Check package file requirements
                 bool isValid = true;
                 if (fileset.AddressMode == "Package")
-                    isValid = _PackageRDP; // package.rdp
+                    isValid = _PackageRDP;
                 else if (fileset.AddressMode == "Data")
-                    isValid = _DataRDP; // data.rdp
+                    isValid = _DataRDP;
                 else if (fileset.AddressMode == "Patch")
-                    isValid = _PatchRDP; // patch.rdp
+                    isValid = _PatchRDP;
 
                 Console.WriteLine($"Fileset {i + 1}:");
                 Console.WriteLine($"  Address Mode: {fileset.AddressMode}");
@@ -139,7 +139,7 @@ namespace SharpRES
             {
                 var fileset = _resFile.Filesets[i];
 
-                // Skip dummy filesets
+
                 if (fileset.RawOffset == 0 && fileset.Size == 0 && fileset.OffsetName == 0 && fileset.ChunkName == 0)
                 {
                     Console.WriteLine($"Fileset {i + 1}: [Dummy] - Skipped extraction.");
@@ -194,6 +194,22 @@ namespace SharpRES
                     case "SET_D":
                         sourceFile = _inputResFile;
                         break;
+                    case "DataSet":
+                        {
+                            string dataSetPath = null;
+                            if (fileset.Names != null && fileset.Names.Length > 0)
+                            {
+                                string lastEntry = fileset.Names[fileset.Names.Length - 1];
+                                if (lastEntry.StartsWith("PATH=", StringComparison.OrdinalIgnoreCase))
+                                    dataSetPath = lastEntry.Substring(5); 
+                            }
+                            string dataSetDisplay = !string.IsNullOrEmpty(dataSetPath) ? dataSetPath : "(path unknown)";
+                            Console.WriteLine($"Fileset {i + 1}: [DataSet] - File is already outside RDP: '{dataSetDisplay}'");
+                            fileset.CompressedBLZ2 = null;
+                            fileset.CompressedBLZ4 = null;
+                            fileset.Filename = null;
+                            continue;
+                        }
                     case "Reserve":
                     case "Empty":
                         // Generate empty file
@@ -227,7 +243,7 @@ namespace SharpRES
                     // Extract or create file
                     if (fileset.AddressMode == "Reserve" || fileset.AddressMode == "Empty" || fileset.Size == 0)
                     {
-                        // Create empty file
+
                         File.WriteAllBytes(outputPath, Array.Empty<byte>());
                         Console.WriteLine($"Fileset {i + 1}: Created empty file at {outputPath}");
                         fileset.CompressedBLZ2 = false;
@@ -265,7 +281,7 @@ namespace SharpRES
                         bool isBLZ2 = false;
                         bool isBLZ4 = false;
 
-                        // Check for BLZ4 compression first
+
                         if (BLZ4Utils.IsBLZ4(chunk))
                         {
                             outputData = BLZ4Utils.UnpackBLZ4Data(chunk);
@@ -273,7 +289,7 @@ namespace SharpRES
                         }
                         else
                         {
-                            // Try BLZ2 decompression
+
                             outputData = Deflate.DecompressChunk(chunk, out isBLZ2);
                         }
 
@@ -293,7 +309,7 @@ namespace SharpRES
                             targetDict[fileset.RealOffset].Add(outputPath);
                         }
 
-                        // Log extraction
+
                         if (isBLZ4)
                             Console.WriteLine($"Fileset {i + 1}: Decompressed BLZ4 {chunk.Length} bytes to {outputData.Length} bytes at {outputPath}");
                         else if (isBLZ2)
@@ -304,7 +320,7 @@ namespace SharpRES
                             Console.WriteLine($"Fileset {i + 1}: Extracted {chunk.Length} bytes (raw) to {outputPath}");
                     }
 
-                    // Track nested archives for subsequent processing
+
                     string extension = Path.GetExtension(outputPath).ToLower();
                     if (extension == ".res")
                         resFiles.Add(outputPath);
@@ -334,7 +350,7 @@ namespace SharpRES
                 Console.WriteLine($"\nSkipping extraction of {resFiles.Count} nested RES and {rtblFiles.Count} nested RTBL file(s) due to -single flag.");
             }
 
-            // Finalization steps should only be run by the top-level call that started the whole process.
+
             if (_isTopLevelCall)
             {
                 SerializeRDPDictionaries(packageDict, "packageDict.json");
@@ -388,7 +404,7 @@ namespace SharpRES
                     }
 
                     string resOutputFolder = Path.Combine(Path.GetDirectoryName(resFilePath), Path.GetFileNameWithoutExtension(resFilePath));
-                    // Pass the tracker down to the next level of extraction.
+
                     RESData resData = new RESData(resFile, _PackageRDP, _DataRDP, _PatchRDP, resFilePath, resOutputFolder, packageDict, dataDict, patchDict, false, _resListTracker);
                     resData.PrintInformation();
 
@@ -398,7 +414,7 @@ namespace SharpRES
                     File.WriteAllText(outputJsonFile, jsonOutput);
                     Console.WriteLine($"Nested RES serialization complete. Output saved to {outputJsonFile}");
 
-                    // Add to the unified RESList tracker.
+                    
                     _resListTracker?.Add(new
                     {
                         Index = _resListTracker.Count + 1,
@@ -472,17 +488,18 @@ namespace SharpRES
                 return null;
 
             // First pointer: name, second pointer: type/extension, others: directories
-            string fileName = fileset.Names[0];
-            string extension = fileset.Names.Length > 1 ? fileset.Names[1] : "";
-            List<string> directories = fileset.Names.Length > 2 ? fileset.Names.Skip(2).ToList() : new List<string>();
+            string fileName = SanitizeChar(fileset.Names[0]);
+            string extension = fileset.Names.Length > 1 ? SanitizeChar(fileset.Names[1]) : "";
+            List<string> directories = fileset.Names.Length > 2
+                ? fileset.Names.Skip(2).Select(SanitizeChar).ToList()
+                : new List<string>();
 
-            // Prepend output folder
             directories.Insert(0, _outputFolder);
 
-            // Construct directory path
+            
             string directoryPath = string.Join(Path.DirectorySeparatorChar.ToString(), directories);
 
-            // Construct base file path
+            
             string baseFileName = string.IsNullOrEmpty(extension) ? fileName : $"{fileName}.{extension}";
             string outputPath = string.IsNullOrEmpty(directoryPath)
                 ? Path.Combine(_outputFolder, baseFileName)
@@ -504,6 +521,22 @@ namespace SharpRES
             }
 
             return finalPath;
+        }
+
+        private static string SanitizeChar(string segment)
+        {
+            if (string.IsNullOrEmpty(segment))
+                return segment;
+
+
+            segment = segment.Replace('/', '\\');
+
+            char[] invalidChars = Path.GetInvalidFileNameChars()
+                .Union(Path.GetInvalidPathChars())
+                .Except(new[] { Path.DirectorySeparatorChar })
+                .ToArray();
+
+            return string.Concat(segment.Select(c => invalidChars.Contains(c) ? '_' : c));
         }
     }
 }
