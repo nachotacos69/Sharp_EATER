@@ -182,7 +182,11 @@ namespace SharpRES
 
                 foreach (var langData in langsToProcess)
                 {
-                    string langFolder = Path.Combine(_outputFolder, langData.Language);
+                    // direct extract with no folder sorting if a `-LANG` args is applied
+
+                    string langFolder = (_langFilter != null)
+                        ? _outputFolder
+                        : Path.Combine(_outputFolder, langData.Language);
                     Console.WriteLine($"\n=== Extracting Language: {langData.Language} ===");
 
                     var (resFiles, rtblFiles) = ExtractFilesForLanguage(
@@ -392,7 +396,7 @@ namespace SharpRES
             return (resFiles, rtblFiles);
         }
 
- 
+
         private void ExtractNestedRtblFiles(List<string> rtblFiles,
             Dictionary<uint, List<string>> packageDict,
             Dictionary<uint, List<string>> dataDict,
@@ -441,7 +445,7 @@ namespace SharpRES
                         Path.GetDirectoryName(resFilePath),
                         Path.GetFileNameWithoutExtension(resFilePath));
 
-                   
+
                     var resData = new RESData(resFile, _PackageRDP, _DataRDP, _PatchRDP,
                         resFilePath, resOutputFolder, packageDict, dataDict, patchDict,
                         false, _resListTracker, _langFilter);
