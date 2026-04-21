@@ -1,0 +1,90 @@
+# This supports Vita only. for PS4. it would be in a INT64 structure.
+
+
+
+>>> Header Information
+Magic Number (int32): Header of the file. '0x73657250' or 'Pres'.
+Padding (int32): skip this part. used to filled with a value in Japanese version,
+Group Count (int8): total count of the groups.
+Version (int8): version of the RES file. the game expects the version is equal to 3 by default. if not, this will cause mismatch.
+Unknown (6 bytes): not documented yet. skip. this also includes the UNK1 (int32) + 2 bytes padding
+Config (int32): overall size of the information [header to the name structures] (before chunks of data)
+UpdateDataOffset (int32): a offset for specific RES file need to seek (ex: god_menu.res [patch] needs to seek god_menu.res [original]) 
+UpdateDataSize (int32): size of that specific RES file that's being seeked and use its data
+Country Value (int32): filled with specific values. Check CountrySet
+--FIXED HEADER SIZE = 32 bytes
+Note: check DLC Info on the end of the docs.
+
+>>> Country Set Information.
+DataSet Offset: pointer of the DataSet Structure
+DataSet Length: size of that DataSet
+-- Structure Sizes: IF Country Value is 1 = Jump to reading DataSets || IF: Country Value is 3 = 32 bytes || IF: Country Value is 6 = 48 bytes
+-- Language Order: EN, FR, IT, DE, ES, RU
+
+>>> DataSet Information
+DataSet Offset (int32): offset of where the FileSet is located.
+DataSet Count (int32): how many sets/files within that FileSet.
+--FIXED DataSet Size = 64 bytes (4 + 4 = 8 bytes * 8 groups counts = 64 bytes)
+Note: 1 group = 8 bytes. the game uses 8 groups in total as base but we will let the group count decide the proper results.
+
+
+
+>>> FileSet Information
+Raw Offset (int32): offset information.
+Real Offset (int32): converting Raw Offset to Real Offset. This is the one you need to use when seeking data. (this is not part of the FileSet structure)
+Size (int32): size of that data.
+Offset Name (int32): offset of the Name Pointers for this FileSet.
+Chunk Name (int32): defines how many pointers for that Offset Name.
+Padding: 12 bytes. game uses this for other things, best to skip.
+Unpack Size (int32): true/raw size of that data when decompressed. (if not compressed, value matches as size)
+-- FIXED FileSet Size = 32 bytes (4 + 4 + 4 + 4 + 12 + 4)
+
+>>> Address Modes Masking (for Raw Offset to Real Offset Conversion)
+0x00 = Empty/Reserve
+0x30 = DataSets (default raw offset value = 0x30000000. external folder source = data_[value])
+0x40 = Package (external file source = package.rdp)
+0x60 = Patch (external file source = patch.rdp)
+0xC0 = Current (i call this SET_C)
+0xD0 = Current (i call this SET_D. same function as SET_C, but sometimes appears on different RES files)
+>> Converting Raw Offset to Real Offset requires you to do bitshifting, the bit shift values can be Right Shift "24" or "28" but i do the "24".
+- for Reserve. these stuff usually are empty files, some are valid but placed in `bin` folders. usually contain `self` modules.
+- for DataSets. they exist as folders (data_[value]). only to interact with their `size` value if you changed something with a specific file.
+- for SET_C and SET_D. their data is located within the current RES file you are reading or checking out (exclude multiplication).
+// Example (non-multiplication): 0xC0001234 >> shift right 24 bits -> 0xC0 || masking > 0x00001234. the Real Offset of a SET_C is 0x00001234.
+- for Package, Data, Patch uses different external sources.. and converting their Raw Offset requires multiplication of offsets by 0x800.
+// Example (multiplication):
+- if FileSet has Package Address Mode => Raw Offset -> 0x40109BFE >> shift right 24 bits -> 0x40 > masking > 0x00109BFE * 0x800 = 0x84DFF000.
+-- the Real Offset of a Package is 0x84DFF000.
+
+
+
+>>> Name Pointers
+Pointers (int32): these pointers leads to the fileset's actual file name.
+-- Name Pointers Size = vary, but max size is 20 bytes (4 + 4 + 4 + 4)
+// Example:
+- if Offset Name is 0x2000, and has 3 Chunk Name value. check 0x2000, read each pointers by 4 bytes each.
+- since chunk name value equivalents to 4 bytes. so 4 bytes * 3 = 12 bytes, cut 12 bytes by 4, you get 3 pointers
+Note:
+? use Chunk Name to control the pointers you need to read. if chunkname = 1, expect to get its data between Offset and OffsetName.
+? since the size given for that filset is incorrect so you'll have to do workarounds to get the real size. and the original size should be kept the same.
+? repacking that file with its original size will work. but using the correct size of that file will crash the game.
+
+
+====DLC Info
+- The DLC Section usually is a updated version of the RES file. thus it either extends the original RES file's fileset.
+  the DLC type of RES file still checks for that base RES file...
+  In certain moments, it still seeks some original SET_C or SET_D filesets on the Original/Base RES file.
+  
+- certain filesets with their SET_C/SET_D will have its own PATCH version if that specific file is updated.
+  So you'll see a `god_game.tr2` in a Base RES file in a SET_C fileset addressMode, but in the DLC Type of RES file. that `god_game.tr2` is now a PATCH AddressMode
+- tinker around to find the right recipe to properly extract its content.
+
+// Example on doing some modification:
+- if DLC RES file's SET_C seeks "MS_010N_calig.res", and the size does not match with the original counterpart being checked.
+  because you modified the original data and the size range changed. the game does not load that, and a DLC pop up error will occur.
+
+- To counter this, you need to update the original data size to match in DLC's SET_C 
+  (if i remember correctly once you update a Original/Base RES file, you have to write the new information on the DLC counterpart of that RES file).
+
+- Another method is put the new modified data on the EOF of either on "Data, Package, or Patch" RDP files, divide the offset by 800 => [offset / 0x800]
+  then use the divided offset to update the SET_C raw offset to the Patch Address Mode offset. (0xC01000 to 0x608000)
