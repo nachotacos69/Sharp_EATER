@@ -19,6 +19,7 @@ namespace SharpRES
             public uint FsPos { get; set; } // Position of the fileset structure in the file
         }
 
+        private string _langFilter;
         private readonly string _inputRtblFile;
         private readonly string _outputFolder;
         public List<Fileset> Filesets { get; private set; }
@@ -39,12 +40,14 @@ namespace SharpRES
         public void Unpack(Dictionary<uint, List<string>> packageDict = null,
                            Dictionary<uint, List<string>> dataDict = null,
                            Dictionary<uint, List<string>> patchDict = null,
-                           List<object> resListTracker = null)
+                           List<object> resListTracker = null,
+                           string langFilter = null)
         {
             _packageDict = packageDict;
             _dataDict = dataDict;
             _patchDict = patchDict;
             _resListTracker = resListTracker;
+            _langFilter = langFilter;
             _isTopLevelCall = (packageDict == null && dataDict == null && patchDict == null);
 
             Console.WriteLine($"=== Parsing RTBL File: {_inputRtblFile} ===");
@@ -374,7 +377,7 @@ namespace SharpRES
 
                     string resOutputFolder = Path.Combine(_outputFolder, Path.GetFileNameWithoutExtension(resFilePath));
                     // Pass the tracker down to the RESData instance.
-                    RESData resData = new RESData(resFile, packageRDP, dataRDP, patchRDP, resFilePath, resOutputFolder, packageDict, dataDict, patchDict, false, _resListTracker);
+                    RESData resData = new RESData(resFile, packageRDP, dataRDP, patchRDP, resFilePath, resOutputFolder, packageDict, dataDict, patchDict, false, _resListTracker, _langFilter);
                     resData.PrintInformation();
 
                     // Serialize nested RES file to JSON in the parent output folder

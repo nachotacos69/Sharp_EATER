@@ -112,10 +112,10 @@ namespace SharpRES
             {
 
                 if (langFilter != null)
-                    Console.WriteLine($"[Warning] '-LANG {langFilter}' has no effect on .rtbl files and will be ignored.");
+                    Console.WriteLine($"Passing Language '{langFilter}' on every extracted res files.");
 
                 RTBL rtblFile = new RTBL(inputFile);
-                rtblFile.Unpack();
+                rtblFile.Unpack(langFilter: langFilter);
             }
             else
             {
