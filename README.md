@@ -2,8 +2,8 @@
 Created by: Yamato Nagasaki
 
 - A **CONCEPT** tool used for basic unpacking and repacking.
-- It only supports single RES file though, not overall a batch/full unpacking and repacking
-- This only supports base game only, DLC will not be supported. but information is provided in documenation
+- It supports a nested or single RES file unpacking and single RES file repacking, doesn't support full nested RES repack since it's imperfect.
+- This will only support base game only, DLC unpack/repack requires a couple of manual editing of hex values. more information of the DLC is provided in documenation.
 
 
 ### Compatible with JP versions of the game:
